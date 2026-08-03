@@ -93,7 +93,8 @@ def main():
             raise RuntimeError(f"post-check: suspicious size {size} bytes")
 
         os.makedirs(OUTDIR, exist_ok=True)
-        dated = os.path.join(OUTDIR, f"funnel_dashboard_{period[1]}.html")
+        tag = f"{period[0]}_{period[1]}"
+        dated = os.path.join(OUTDIR, f"funnel_dashboard_{tag}.html")
         latest = os.path.join(OUTDIR, "funnel_dashboard_latest.html")
         with open(dated, "w", encoding="utf-8") as f:
             f.write(out_html)

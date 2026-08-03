@@ -26,6 +26,8 @@ FIELDS_STATE = os.path.join("state", "visit_fields.json")
 API = "https://api-metrika.yandex.ru"
 HEAD = {"Authorization": f"OAuth {TOKEN}"}
 
+POLL_TIMEOUT = 45 * 60
+
 
 def log(msg):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
@@ -74,9 +76,7 @@ def norm(col):
 def ensure_table(conn, header):
     cols = [norm(c) for c in header]
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT to_regclass(%s)", (VISITS,)
-        )
+        cur.execute("SELECT to_regclass(%s)", (VISITS,))
         exists = cur.fetchone()[0] is not None
         if not exists:
             body = ",\n  ".join(f'"{c}" text' for c in cols)
@@ -123,7 +123,6 @@ def open_tsv(path):
 
 
 def split_by_day(path, tmpdir):
-    """Split TSV into per-day files. Returns (header, {day: filepath, ...})."""
     with open_tsv(path) as f:
         header_line = f.readline().rstrip("\n").rstrip("\r")
         header = header_line.split("\t")
@@ -192,20 +191,20 @@ def load_tsv(path):
     return total
 
 
-def req(method, url, **kw):
+def req(method, url, attempts=8, **kw):
     last = None
-    for attempt in range(5):
+    for n in range(attempts):
         try:
-            r = requests.request(method, url, headers=HEAD, timeout=120, **kw)
+            r = requests.request(method, url, headers=HEAD, timeout=180, **kw)
             if r.status_code >= 500:
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
             return r
         except Exception as e:
             last = e
-            wait = 2 ** attempt
-            log(f"  retry {attempt + 1}/5 in {wait}s — {type(e).__name__}")
+            wait = min(2 ** n, 60)
+            log(f"  retry {n + 1}/{attempts} in {wait}s - {type(e).__name__}")
             time.sleep(wait)
-    raise RuntimeError(f"network failed after 5 attempts: {last}")
+    raise RuntimeError(f"network failed after {attempts} attempts: {last}")
 
 
 def load_fields():
@@ -216,6 +215,44 @@ def load_fields():
         )
     with open(FIELDS_STATE, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def list_logrequests():
+    r = req("GET", f"{API}/management/v1/counter/{COUNTER}/logrequests")
+    if r.status_code != 200:
+        log(f"  cannot list logrequests: HTTP {r.status_code}")
+        return []
+    return r.json().get("requests", [])
+
+
+def clean_request(request_id):
+    try:
+        req(
+            "POST",
+            f"{API}/management/v1/counter/{COUNTER}/logrequest/{request_id}/clean",
+            attempts=3,
+        )
+        log(f"  cleaned request {request_id}")
+    except Exception as e:
+        log(f"  clean {request_id} failed: {type(e).__name__}")
+
+
+def find_reusable(d1, d2):
+    """Ищет живой заказ на тот же период. Мёртвые — убирает."""
+    for item in list_logrequests():
+        rid = item.get("request_id")
+        status = item.get("status")
+        same = (
+            item.get("date1") == d1
+            and item.get("date2") == d2
+            and item.get("source") == "visits"
+        )
+        if same and status in ("created", "processing", "processed"):
+            log(f"  reusing existing request {rid} (status={status})")
+            return rid
+        if status in ("processing_failed", "canceled", "cleaned_automatically_as_too_old"):
+            clean_request(rid)
+    return None
 
 
 def create_logrequest(d1, d2, fields):
@@ -232,60 +269,82 @@ def create_logrequest(d1, d2, fields):
             },
         )
         if r.status_code == 200:
-            return r.json()["log_request"]["request_id"], fields
+            return r.json()["log_request"]["request_id"]
         text = r.text
         rejected = [f for f in fields if f in text]
         if not rejected:
             raise RuntimeError(f"logrequest failed: HTTP {r.status_code} {text[:500]}")
         for f in rejected:
-            log(f"  API rejected field {f} — removing")
+            log(f"  API rejected field {f} - removing")
             fields.remove(f)
     raise RuntimeError("too many rejected fields")
+
+
+def wait_processed(request_id):
+    """Опрос статуса. Сетевые сбои не убивают этап: заказ на стороне Метрики жив."""
+    t0 = time.time()
+    fails = 0
+    while time.time() - t0 < POLL_TIMEOUT:
+        try:
+            r = req(
+                "GET",
+                f"{API}/management/v1/counter/{COUNTER}/logrequest/{request_id}",
+                attempts=3,
+            )
+            info = r.json()["log_request"]
+            status = info["status"]
+            fails = 0
+            if status == "processed":
+                parts = len(info.get("parts", []))
+                log(f"  [{int(time.time() - t0)}s] processed, parts: {parts}")
+                return parts
+            if status in ("processing_failed", "canceled"):
+                raise RuntimeError(f"logrequest status={status}")
+            log(f"  [{int(time.time() - t0)}s] {status} ...")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            fails += 1
+            log(f"  [{int(time.time() - t0)}s] poll error {fails}: {type(e).__name__}")
+            if fails >= 10:
+                raise RuntimeError(f"polling failed {fails} times in a row: {e}")
+        time.sleep(15)
+    raise RuntimeError(f"logrequest not processed within {POLL_TIMEOUT}s")
 
 
 def api_pull(d1, d2):
     fields = load_fields()
     log(f"API pull {d1}..{d2}, fields={len(fields)}")
-    request_id, fields = create_logrequest(d1, d2, fields)
-    log(f"  request_id={request_id}")
-    parts = None
-    t0 = time.time()
-    while True:
-        r = req("GET", f"{API}/management/v1/counter/{COUNTER}/logrequest/{request_id}")
-        info = r.json()["log_request"]
-        status = info["status"]
-        if status == "processed":
-            parts = len(info.get("parts", []))
-            log(f"  [{int(time.time() - t0)}s] processed, parts: {parts}")
-            break
-        if status in ("processing_failed", "canceled"):
-            raise RuntimeError(f"logrequest status={status}")
-        log(f"  [{int(time.time() - t0)}s] {status} ...")
-        time.sleep(11)
+
+    request_id = find_reusable(d1, d2)
+    if request_id is None:
+        request_id = create_logrequest(d1, d2, fields)
+        log(f"  request_id={request_id} created")
+
+    parts = wait_processed(request_id)
+
     fd, tmp_path = tempfile.mkstemp(suffix=".tsv", prefix="metrica_api_")
     os.close(fd)
-    with open(tmp_path, "w", encoding="utf-8", newline="") as out:
-        for n in range(parts):
-            r = req(
-                "GET",
-                f"{API}/management/v1/counter/{COUNTER}/logrequest/"
-                f"{request_id}/part/{n}/download",
-            )
-            text = r.content.decode("utf-8")
-            if n > 0:
-                text = text.split("\n", 1)[1] if "\n" in text else ""
-            out.write(text)
-            if not text.endswith("\n"):
-                out.write("\n")
-            log(f"  part {n + 1}/{parts} downloaded")
     try:
+        with open(tmp_path, "w", encoding="utf-8", newline="") as out:
+            for n in range(parts):
+                r = req(
+                    "GET",
+                    f"{API}/management/v1/counter/{COUNTER}/logrequest/"
+                    f"{request_id}/part/{n}/download",
+                )
+                text = r.content.decode("utf-8")
+                if n > 0:
+                    text = text.split("\n", 1)[1] if "\n" in text else ""
+                out.write(text)
+                if not text.endswith("\n"):
+                    out.write("\n")
+                log(f"  part {n + 1}/{parts} downloaded")
         total = load_tsv(tmp_path)
     finally:
-        os.remove(tmp_path)
-        req(
-            "POST",
-            f"{API}/management/v1/counter/{COUNTER}/logrequest/{request_id}/clean",
-        )
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        clean_request(request_id)
     return total
 
 
@@ -308,18 +367,27 @@ def main():
     ap.add_argument("--from-file")
     ap.add_argument("--date1")
     ap.add_argument("--date2")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="clean all pending logrequests and exit")
     args = ap.parse_args()
 
+    if args.cleanup:
+        for item in list_logrequests():
+            log(f"  {item.get('request_id')} {item.get('date1')}..{item.get('date2')} "
+                f"status={item.get('status')}")
+            clean_request(item.get("request_id"))
+        return 0
+
     if args.from_file:
-        stage, run_id = "ingest_file", journal_start("ingest_file")
+        run_id = journal_start("ingest_file")
         try:
             total = load_tsv(args.from_file)
             journal_end(run_id, "ok", total)
-            log(f"DONE {stage}: {total} rows")
+            log(f"DONE ingest_file: {total} rows")
             return 0
         except Exception as e:
             journal_end(run_id, "fail", None, e)
-            log(f"FAIL {stage}: {type(e).__name__}: {e}")
+            log(f"FAIL ingest_file: {type(e).__name__}: {e}")
             return 1
 
     if args.date1 and args.date2:
@@ -328,10 +396,10 @@ def main():
         conn = connect()
         rng = days_to_load(conn)
         conn.close()
-        d1, d2 = rng[0].isoformat(), rng[1].isoformat()
         if rng[0] > rng[1]:
             log("nothing to load")
             return 0
+        d1, d2 = rng[0].isoformat(), rng[1].isoformat()
 
     run_id = journal_start("ingest_api")
     try:
