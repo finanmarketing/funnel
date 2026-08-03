@@ -1,0 +1,16 @@
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+# сырые дампы и выгрузки (сотни МБ, не для git)
+metrica_dump/
+*.tsv
+*.tsv.gz
+
+# артефакты пайплайна
+out/
+state/payload.json
+logs/

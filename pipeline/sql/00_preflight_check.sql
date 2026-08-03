@@ -1,0 +1,1 @@
+SELECT table_name FROM information_schema.tables WHERE table_schema = 'dwh_ezru_loans' AND table_name LIKE 'metrica%' ORDER BY 1;
