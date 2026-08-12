@@ -169,8 +169,6 @@ padding:2px 6px;border-radius:4px;white-space:nowrap}
  <div class="funnel" id="funnel"></div>
  <div class="sh"><h3>Параллельно: вход существующих клиентов</h3></div>
  <div class="funnel" id="loginf"></div>
- <div class="sh"><h3>Заявка и решение</h3><span class="mode" style="border:none;background:none;color:var(--faint);font-weight:400">общий этап для новых и повторных клиентов · доли от экрана выплаты</span></div>
- <div class="funnel" id="applyf"></div>
  <div class="sh"><h3>Прочие события сайта</h3></div>
  <div class="othr"><div class="rgrid" id="other"></div></div>
 </div>
@@ -205,7 +203,7 @@ function DIM(g){const dm=DATA.dim;
   return Object.keys(o).length?{d:o,lbl:'за весь период'}:null;}
  const m=curMonth();const s=m&&dm[m]?dm[m][g]:null;
  return s?{d:s,lbl:st.level==='month'?'за '+m:'за месяц '+m}:null;}
-const UNANCH=new Set(['465920058']);SL['PAYMENT_PAGE']='Экран выплаты';SL['REJECT_PAGE']='Страница отказа';function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
+const UNANCH=new Set(['398982288','398982605','398983728','398982473','465920058']);function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
 function strictArr(){const S=DATA.strict;if(!S)return null;
  if(st.level==='all'){const ms=DATA.nav.months.map(m=>S.month[m]).filter(Boolean);
   if(!ms.length)return null;
@@ -245,24 +243,23 @@ function render(){const c=raw();
  if(!sa&&mode===1)mode=0;
  document.getElementById('funnel').innerHTML=chain(DATA.funnel,c);
  document.getElementById('loginf').innerHTML=chain(DATA.login,c,true);
- document.getElementById('applyf').innerHTML=chain(DATA.apply||[],c,true,true);
  document.getElementById('other').innerHTML=DATA.other.map(([nm,g])=>{const v=V(c,g);
   return v?`<div class="rr"><span class="rn">${nm}</span><span class="rv">${F(v)}</span></div>`:''}).join('')
   ||'<span class="note">За период событий не зафиксировано</span>';
  crumbs();}
-function chain(list,c,isL,isF){
+function chain(list,c,isL){
  const SA=(!isL&&mode===1)?strictArr():null;
  const getv=(f,i)=>SA?(seg===0?SA[i][0]:seg===1?SA[i][1]:SA[i][0]-SA[i][1]):V(c,f[1]);
  const mx=Math.max(...list.map((f,i)=>getv(f,i)),1);let prev=null,h='';
  list.forEach((f,i)=>{const [rw,gid]=f,lb=SL[rw]||rw,v=getv(f,i),w=Math.max(3,100*v/mx);
-  const dn0=(!isF&&(mode===1||isL))?prev:(i>0?getv(list[0],0):null);const cr=dn0!==null&&dn0>0?P(v,dn0):null;
-  const cc=cr===null?'none':((!isF&&(mode===1||isL))?(cr>=50?'good':cr>=25?'mid':'bad'):'none');
+  const dn0=(mode===1||isL)?prev:(i>0?getv(list[0],0):null);const cr=dn0!==null&&dn0>0?P(v,dn0):null;
+  const cc=cr===null?'none':((mode===1||isL)?(cr>=50?'good':cr>=25?'mid':'bad'):'none');
   let cls=rw.endsWith('_OK')?'okstep':'';if(rw==='CONFIRM_PAGE')cls='dropstep';
   if(seg===1)cls+=' seg1';
   h+=`<div class="step ${cls} ${open_.has(rw)?'open':''}"><div class="smain" onclick="tg('${rw}')">
    <div class="nm"><span class="ix">${isL?'—':String(i).padStart(2,'0')}</span>${lb}</div>
    <div class="bw"><div class="bar" style="width:${w}%">${v>0&&w>=25?F(v):''}</div>${v>0&&w<25?`<span class="bout">${F(v)}</span>`:''}</div>
-   <div class="cr ${cc}" title="${isF?'доля от «Экран выплаты»':(mode===1||isL)?'переход от предыдущего шага':'доля от «Открыли сайт»'}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
+   <div class="cr ${cc}" title="${(mode===1||isL)?'переход от предыдущего шага':'доля от «Открыли сайт»'}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
    <div class="more">${open_.has(rw)?'Скрыть ▴':'Подробнее ▾'}</div></div>${det(rw,gid,c,v)}</div>`;
   if(v>0)prev=v;});
  return h;}

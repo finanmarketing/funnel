@@ -10,10 +10,6 @@ HTML = os.path.join(BASE_DIR, "out", "funnel_dashboard_latest.html")
 TOL = 101.0
 
 UNANCHORED = {
-    "398982288": "экран-выплаты",
-    "398982605": "выплата-СБП",
-    "398983728": "страница-отказа",
-    "398982473": "выплата-карта",
     "465920058": "заход-браузер",
 }
 
@@ -26,16 +22,20 @@ MARKERS = [
     ("p1 event header", "уникальные посетители"),
     ("p2 DIMBASE", "function DIMBASE(g)"),
     ("p2 UNANCH set", "const UNANCH=new Set"),
-    ("p2 ladder denominator", "dn0=(mode===1||isL)"),
     ("p2 ladder tooltip", "переход от предыдущего шага"),
     ("p2 unanchored label", "экран уточняется"),
     ("p2 dim denominator", "DIMBASE(gid)||vs.reduce"),
     ("p2 dim header", "% от посетителей шага"),
     ("p3 raw visits agg", "a[g]=[0,0,0,0]"),
-    ("p3 unanch browser", "465920058"),
     ("p3 hour events note", "на почасовом уровне события не рассчитываются"),
     ("p3 db gap raw", "V(c,REGOK)/dbn"),
     ("p3 all-level warning", "суммируются по месяцам"),
+    ("p4 apply container", 'id="applyf"'),
+    ("p4 apply labels", "SL['PAYMENT_PAGE']"),
+    ("p4 chain signature", "function chain(list,c,isL,isF)"),
+    ("p4 chain denominator", "dn0=(!isF&&(mode===1||isL))"),
+    ("p4 apply tooltip", "доля от «Экран выплаты»"),
+    ("p4 apply render", "chain(DATA.apply"),
 ]
 
 fails = []
@@ -66,6 +66,14 @@ def load_payload(path):
     j = s.find("const SL=", i)
     k = s.rindex(";", i, j)
     return json.loads(s[i:k]), s
+
+
+def steps_map(D):
+    m = {}
+    for key in ("funnel", "login", "apply"):
+        for pair in D.get(key, []):
+            m[pair[0]] = pair[1]
+    return m
 
 
 def check_markers():
@@ -131,7 +139,7 @@ def check_segments(D):
 
 def check_events(D):
     print("\n[5] События против популяции своего экрана")
-    step_of = dict([tuple(x) for x in D["funnel"]] + [tuple(x) for x in D["login"]])
+    step_of = steps_map(D)
     agg = {}
     for lvl in ("month", "week", "day"):
         for k, c in D[lvl].items():
@@ -147,8 +155,7 @@ def check_events(D):
                         continue
                     v = c.get(g)
                     if v and v[0] > den:
-                        key = (rw, nm, g)
-                        agg.setdefault(key, []).append(100.0 * v[0] / den)
+                        agg.setdefault((rw, nm, g), []).append(100.0 * v[0] / den)
     if not agg:
         ok("ни одно событие не превышает свой экран")
     else:
@@ -158,11 +165,39 @@ def check_events(D):
                 fail(line)
             else:
                 ok(f"{line} — в пределах допуска разметки {TOL - 100:.0f}%")
-    print(f"  (исключены как непривязанные: {', '.join(UNANCHORED.values())})")
+    print(f"  (помечены как непривязанные: {', '.join(UNANCHORED.values())})")
+
+
+def check_apply(D):
+    print("\n[6] Цепочка «Заявка и решение»")
+    ap = D.get("apply")
+    if not ap:
+        fail("ключ apply отсутствует в payload — build_payload не пересчитан")
+        return
+    names = [x[0] for x in ap]
+    ok(f"шаги: {' -> '.join(names)}")
+    base_g = ap[0][1]
+    for mo in D["nav"]["months"]:
+        c = D["month"][mo]
+        base = c.get(base_g, [0])[0]
+        if base <= 0:
+            fail(f"{mo}: PAYMENT_PAGE = 0")
+            continue
+        parts = []
+        for nm, g in ap:
+            v = c.get(g, [0])[0]
+            parts.append(f"{nm}={v} ({100.0 * v / base:.1f}%)")
+            if v > base * 1.01 and g != base_g:
+                fail(f"{mo}/{nm}: {v} > PAYMENT_PAGE {base}")
+        print(f"  INFO  {mo}: {', '.join(parts)}")
+    for nm, g in ap:
+        missing = [d for d in D["day"] if g not in D["day"][d]]
+        if missing:
+            warn(f"{nm}: нет данных в {len(missing)} днях")
 
 
 def check_events_format(D):
-    print("\n[6] Формат событий: 4 значения (люди + визиты)")
+    print("\n[7] Формат событий: 4 значения (люди + визиты)")
     ev = set(g for lst in D["reasons"].values() for _, g in lst)
     bad2, tot = 0, 0
     for lvl in ("month", "week", "day"):
@@ -186,7 +221,7 @@ def check_events_format(D):
 
 
 def check_dims(D):
-    print("\n[7] Разрезы: покрытие топ-7 относительно шага")
+    print("\n[8] Разрезы: покрытие топ-7 относительно шага")
     for mo in D["nav"]["months"]:
         dm = D["dim"].get(mo, {})
         for nm, g in D["funnel"][:1]:
@@ -201,7 +236,7 @@ def check_dims(D):
 
 
 def check_db(D):
-    print("\n[8] Метрика vs БД по месяцам")
+    print("\n[9] Метрика vs БД по месяцам")
     reg = dict([tuple(x) for x in D["funnel"]])["REGISTRATION_PAGE_OK"]
     for mo in D["nav"]["months"]:
         met = D["month"][mo].get(reg, [0])[0]
@@ -218,7 +253,7 @@ def check_db(D):
 
 
 def check_steps_present(D):
-    print("\n[9] Все шаги присутствуют в каждом дне")
+    print("\n[10] Все шаги присутствуют в каждом дне")
     missing = 0
     for d, c in D["day"].items():
         for nm, g in D["funnel"]:
@@ -227,13 +262,13 @@ def check_steps_present(D):
                 if missing <= 3:
                     warn(f"{d}: нет шага {nm}")
     if missing == 0:
-        ok("все 15 шагов есть во всех днях")
+        ok(f"все {len(D['funnel'])} шагов есть во всех днях")
     else:
         warn(f"всего пропусков шагов: {missing}")
 
 
 def check_coverage(D):
-    print("\n[10] Покрытие целей")
+    print("\n[11] Покрытие целей")
     total = D["period"][2]
     partial = [g for g, c in D["cov"].items() if c[2] < total]
     ok(f"целей с данными: {len(D['cov'])}, с неполным покрытием: {len(partial)}")
@@ -256,6 +291,7 @@ def main():
     check_strict(D)
     check_segments(D)
     check_events(D)
+    check_apply(D)
     check_events_format(D)
     check_dims(D)
     check_db(D)

@@ -7,7 +7,8 @@ from datetime import date, datetime, timedelta
 import psycopg2
 from dotenv import load_dotenv
 
-from funnel_goals import EVENT_IDS, FUNNEL, LOGIN, OTHER, REASONS, STEP_IDS
+from funnel_goals import (APPLY, EVENT_IDS, FUNNEL, LOGIN, OTHER, REASONS,
+                          STEP_IDS)
 
 load_dotenv()
 
@@ -90,7 +91,7 @@ def journal_end(run_id, status, rows=None, err=None):
 
 
 def preflight(conn, d1, d2):
-    """Дешёвая проверка до тяжёлых расчётов. Стоит 2 секунды вместо 16 минут."""
+    """Дешёвая проверка до тяжёлых расчётов."""
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (VISITS,))
         if cur.fetchone()[0] is None:
@@ -111,14 +112,11 @@ def preflight(conn, d1, d2):
         raise RuntimeError(
             f"preflight: data loaded up to {mx}, but {d2} requested. "
             f"Load fresh data first: python pipeline\\run_pipeline.py  "
-            f"(or python pipeline\\ingest_metrica.py). "
-            f"To inspect existing data instead: "
-            f"python pipeline\\build_payload.py --date2 {mx}"
+            f"(or inspect existing: build_payload.py --date2 {mx})"
         )
     if str(mn) > d1:
         raise RuntimeError(
-            f"preflight: earliest loaded day is {mn}, but period starts {d1}. "
-            "Backfill is incomplete."
+            f"preflight: earliest loaded day is {mn}, but period starts {d1}."
         )
     log(f"preflight ok: loaded {mn}..{mx}, {ndays} days, target {d1}..{d2}")
 
@@ -129,6 +127,7 @@ def build(conn, d1, d2):
     payload = {
         "funnel": [[n, g] for n, g in FUNNEL],
         "login": [[n, g] for n, g in LOGIN],
+        "apply": [[n, g] for n, g in APPLY],
         "other": [[n, g] for n, g in OTHER],
         "reasons": {k: [[n, g] for n, g in v] for k, v in REASONS.items()},
     }
@@ -256,7 +255,7 @@ def quality_checks(payload, d2):
     if missing:
         raise RuntimeError(f"QC: steps missing on {d2}: {missing}")
 
-    step_of = dict(FUNNEL + LOGIN)
+    step_of = dict(FUNNEL + LOGIN + APPLY)
     bad = []
     for level in ("month", "week", "day"):
         for k, goals in payload[level].items():
@@ -269,10 +268,10 @@ def quality_checks(payload, d2):
                     continue
                 for nm, g in evs:
                     val = goals.get(g)
-                    if val and val[0] > den:
-                        bad.append(f"{level}/{k}/{rw}/{nm}: {val[0]}>{den}")
+                    if val and val[0] > den * 1.01:
+                        bad.append(f"{level}/{k}/{rw}/{g}: {val[0]}>{den}")
     if bad:
-        log(f"  QC WARNING: {len(bad)} event(s) exceed screen population")
+        log(f"  QC WARNING: {len(bad)} event(s) exceed screen population by >1%")
         for b in bad[:5]:
             log(f"    {b}")
     else:
