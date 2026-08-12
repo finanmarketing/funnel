@@ -191,7 +191,7 @@ function tab(i){document.querySelectorAll('.tab').forEach((t,j)=>t.className='ta
  document.querySelectorAll('.page').forEach((p,j)=>p.className='page'+(i===j?' on':''));
  window.scrollTo(0,0);}
 function raw(){if(st.level==='all'){let a={};for(const m in DATA.month)for(const g in DATA.month[m]){
- const v=DATA.month[m][g];if(!a[g])a[g]=[0,0,0,0];a[g][0]+=v[0];a[g][1]+=v[1];if(v.length>3){a[g][2]+=v[2];a[g][3]+=v[3];}}return a;}
+ const v=DATA.month[m][g];if(!a[g])a[g]=[0,0];a[g][0]+=v[0];a[g][1]+=v[1];}return a;}
  return (DATA[st.level]||{})[st.key]||{};}
 function V(c,g){const v=c[g];if(!v)return 0;return seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}function VV(c,g){const v=c[g];if(!v||v.length<4)return 0;return seg===0?v[2]:seg===1?v[3]:v[2]-v[3];}
 function curMonth(){if(st.level==='month')return st.key;if(st.level==='week')return mow(st.key);
@@ -203,7 +203,7 @@ function DIM(g){const dm=DATA.dim;
   return Object.keys(o).length?{d:o,lbl:'за весь период'}:null;}
  const m=curMonth();const s=m&&dm[m]?dm[m][g]:null;
  return s?{d:s,lbl:st.level==='month'?'за '+m:'за месяц '+m}:null;}
-const UNANCH=new Set(['398982288','398982605','398983728','398982473','465920058']);function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
+const UNANCH=new Set(['398982288','398982605','398983728','398982473']);function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
 function strictArr(){const S=DATA.strict;if(!S)return null;
  if(st.level==='all'){const ms=DATA.nav.months.map(m=>S.month[m]).filter(Boolean);
   if(!ms.length)return null;
@@ -222,14 +222,13 @@ function render(){const c=raw();
  const tot=c[REGOK]?c[REGOK][0]:0,nw=c[REGOK]?c[REGOK][1]:0;
  document.getElementById('segs').innerHTML=[['Все',0,tot],['Новые',1,nw],['Повторные',2,tot-nw]]
   .map(([t,i,n])=>`<span class="seg ${seg===i?'active':''}" onclick="sg(${i})">${t}<span class="cnt">${F(n)}</span></span>`).join(' ');
- document.getElementById('segnote').textContent=(seg===0?'':
-  seg===1?'показаны только те, кто впервые на сайте':'показаны только вернувшиеся посетители')+
-  (st.level==='all'?(seg===0?'':' · ')+'за весь период числа суммируются по месяцам: клиент, заходивший в разные месяцы, учтён несколько раз':'');
+ document.getElementById('segnote').textContent=seg===0?'':
+  seg===1?'показаны только те, кто впервые на сайте':'показаны только вернувшиеся посетители';
  const SAk=(mode===1)?strictArr():null;
  const gk=i=>SAk?(seg===0?SAk[i][0]:seg===1?SAk[i][1]:SAk[i][0]-SAk[i][1]):V(c,DATA.funnel[i][1]);
  const main=gk(0),reg=gk(1),ok=gk(2),last=gk(14);
  const dbn=dbReg();
- const dbline=(dbn&&seg===0)?`<div class="dbl">в базе ${F(dbn)} · Метрика видит на ${(100*(1-V(c,REGOK)/dbn)).toFixed(0)}% меньше</div>`:'';
+ const dbline=(dbn&&seg===0)?`<div class="dbl">в базе ${F(dbn)} · Метрика видит на ${(100*(1-ok/dbn)).toFixed(0)}% меньше</div>`:'';
  document.getElementById('kpis').innerHTML=[['','Открыли сайт',F(main),'',''],
   ['','Начали регистрацию',F(reg),P(reg,main).toFixed(0)+'% из зашедших на сайт',''],
   ['ok','Зарегистрировались',F(ok),'<b>'+P(ok,reg).toFixed(1)+'%</b> из открывших форму',dbline],
@@ -270,7 +269,7 @@ function det(rw,gid,c,base){let h='<div class="det">';const rs=DATA.reasons[rw];
   const w=nm.startsWith('⚠')?' w':'';const ua=UNANCH.has(g);const den=ua?0:V(c,gid);const s=den?`<span class="sub">${P(v,den).toFixed(1)}%</span>`:(ua?`<span class="sub" style="color:#d8455c">экран уточняется</span>`:'');
   const cv=DATA.cov[g];const part=cv&&cv[2]<DATA.period[2]?` <span class="sub" style="color:#d8455c">только ${cv[0]}–${cv[1]}</span>`:'';
   return `<div class="rr${w}"><span class="rn">${nm.replace('⚠ ','')}${part}</span><span class="rv">${F(v)}${s}${vv?`<span class="sub vis">· ${F(vv)} виз.</span>`:''}</span></div>`}).filter(Boolean).join('');
-  h+=`<div class="dh">События на шаге <span>· уникальные посетители, % от побывавших на экране; виз. — визиты с событием</span></div><div class="rgrid">${rows||`<span class="note">${st.level==='hour'?'на почасовом уровне события не рассчитываются':'за период не зафиксировано'}</span>`}</div>`;}
+  h+=`<div class="dh">События на шаге <span>· уникальные посетители, % от побывавших на экране; виз. — визиты с событием</span></div><div class="rgrid">${rows||'<span class="note">За период не зафиксировано</span>'}</div>`;}
  const D=DIM(gid);
  if(D){h+=`<div class="dh ${rs?'sec':''}">Разрезы посетителей шага <span>· ${D.lbl}${seg?', по всей аудитории':''} · % от посетителей шага; клиент может попасть в несколько источников</span></div><div class="dims">`;
   ['device','os','browser','source'].forEach(dn=>{const vs=D.d[dn];if(!vs)return;
