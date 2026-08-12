@@ -27,6 +27,9 @@ NET_PROBE_INTERVAL = 30
 STAGE_ATTEMPTS = int(os.environ.get("STAGE_ATTEMPTS", "3"))
 STALE_RUN_HOURS = int(os.environ.get("STALE_RUN_HOURS", "6"))
 
+PYTHON_EXE = os.environ.get("PYTHON_EXE") or sys.executable
+REQUIRED_MODULES = ("requests", "psycopg2", "dotenv")
+
 STAGES = [
     ("sync_goals", "sync_goals.py", []),
     ("ingest_metrica", "ingest_metrica.py", []),
@@ -35,6 +38,17 @@ STAGES = [
     ("deliver", "deliver.py", []),
 ]
 
+FATAL_MARKERS = (
+    "ModuleNotFoundError",
+    "ImportError",
+    "SyntaxError",
+    "IndentationError",
+    "FileNotFoundError",
+    "KeyError: 'PG_",
+    "KeyError: 'SMTP_",
+    "KeyError: 'METRICA_",
+)
+
 
 def tcp_alive(host, port, timeout=5):
     try:
@@ -42,6 +56,38 @@ def tcp_alive(host, port, timeout=5):
             return True
     except OSError:
         return False
+
+
+def check_interpreter(emit):
+    """Дешёвая проверка окружения до любых этапов."""
+    emit(f"interpreter: {PYTHON_EXE}")
+    if not os.path.exists(PYTHON_EXE):
+        raise RuntimeError(f"interpreter not found: {PYTHON_EXE}")
+    code = (
+        "import sys;"
+        f"mods={list(REQUIRED_MODULES)!r};"
+        "missing=[];\n"
+        "for m in mods:\n"
+        "    try: __import__(m)\n"
+        "    except Exception: missing.append(m)\n"
+        "print(sys.version.split()[0], '|', ','.join(missing))"
+    )
+    proc = subprocess.run(
+        [PYTHON_EXE, "-c", code], capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or "|" not in out:
+        raise RuntimeError(f"interpreter probe failed: {proc.stderr[:300]}")
+    ver, missing = [x.strip() for x in out.split("|", 1)]
+    emit(f"python version: {ver}")
+    if missing:
+        raise RuntimeError(
+            f"missing modules in {PYTHON_EXE}: {missing}. "
+            "Either set PYTHON_EXE in .env to the interpreter that has them, "
+            f"or install: \"{PYTHON_EXE}\" -m pip install {missing.replace(',', ' ')}"
+        )
+    emit("modules ok: " + ", ".join(REQUIRED_MODULES))
 
 
 def wait_for_db(emit, label):
@@ -107,6 +153,10 @@ def notify_failure(emit, stage, err):
         emit(f"failure notification error: {type(e).__name__}: {e}")
 
 
+def is_fatal(text):
+    return any(m in text for m in FATAL_MARKERS)
+
+
 def run_stage(emit, name, script, extra):
     path = os.path.join(PIPE_DIR, script)
     last_err = ""
@@ -117,7 +167,7 @@ def run_stage(emit, name, script, extra):
         emit(f"--- stage: {name} (attempt {attempt}/{STAGE_ATTEMPTS}) ---")
         s0 = time.time()
         proc = subprocess.run(
-            [sys.executable, path] + extra,
+            [PYTHON_EXE, path] + extra,
             cwd=BASE_DIR, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
         )
@@ -131,6 +181,9 @@ def run_stage(emit, name, script, extra):
         last_err = (proc.stderr or proc.stdout or "")[-1500:]
         emit(f"--- stage {name} FAILED (rc={proc.returncode}) after "
              f"{time.time() - s0:.0f}s ---")
+        if is_fatal(last_err):
+            emit("error is not transient — no retry")
+            break
         if attempt < STAGE_ATTEMPTS:
             emit(f"retrying {name} in 60s")
             time.sleep(60)
@@ -151,10 +204,15 @@ def main():
             f.write(line + "\n")
 
     emit(f"=== PIPELINE START (target day: {day}) ===")
-    emit(f"python: {sys.executable}")
     emit(f"cwd: {BASE_DIR}")
     emit(f"log: {logfile}")
     cleanup_logs(emit)
+
+    try:
+        check_interpreter(emit)
+    except Exception as e:
+        emit(f"=== PIPELINE ABORTED: {e} ===")
+        return 1
 
     if not wait_for_db(emit, "startup"):
         emit("=== PIPELINE ABORTED: no network ===")

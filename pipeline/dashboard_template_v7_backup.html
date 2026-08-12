@@ -145,7 +145,7 @@ padding:2px 6px;border-radius:4px;white-space:nowrap}
 .rgrid,.dims{grid-template-columns:1fr}.segnote{margin-left:0;width:100%}
 .tab{padding:10px 12px;font-size:12.5px}.card{padding:16px 16px}
 .gtab td,.gtab th{padding:8px 7px;font-size:12px}}
-.bw{display:flex;align-items:center;gap:8px}.bout{font-family:var(--mono);font-size:12.5px;font-weight:650;color:#2b3445}.rv .sub.vis{opacity:.7;margin-left:6px}</style></head><body>
+</style></head><body>
 <div class="top"><div class="wrap">
 <div class="tophead">
 <div class="bl"><div class="logo">eZ</div><div>
@@ -193,7 +193,7 @@ function tab(i){document.querySelectorAll('.tab').forEach((t,j)=>t.className='ta
 function raw(){if(st.level==='all'){let a={};for(const m in DATA.month)for(const g in DATA.month[m]){
  const v=DATA.month[m][g];if(!a[g])a[g]=[0,0];a[g][0]+=v[0];a[g][1]+=v[1];}return a;}
  return (DATA[st.level]||{})[st.key]||{};}
-function V(c,g){const v=c[g];if(!v)return 0;return seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}function VV(c,g){const v=c[g];if(!v||v.length<4)return 0;return seg===0?v[2]:seg===1?v[3]:v[2]-v[3];}
+function V(c,g){const v=c[g];if(!v)return 0;return seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}
 function curMonth(){if(st.level==='month')return st.key;if(st.level==='week')return mow(st.key);
  if(st.level==='day'||st.level==='hour')return st.key.slice(0,7);return null;}
 function DIM(g){const dm=DATA.dim;
@@ -203,7 +203,7 @@ function DIM(g){const dm=DATA.dim;
   return Object.keys(o).length?{d:o,lbl:'за весь период'}:null;}
  const m=curMonth();const s=m&&dm[m]?dm[m][g]:null;
  return s?{d:s,lbl:st.level==='month'?'за '+m:'за месяц '+m}:null;}
-const UNANCH=new Set(['398982288','398982605','398983728','398982473']);function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
+const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
 function strictArr(){const S=DATA.strict;if(!S)return null;
  if(st.level==='all'){const ms=DATA.nav.months.map(m=>S.month[m]).filter(Boolean);
   if(!ms.length)return null;
@@ -251,29 +251,29 @@ function chain(list,c,isL){
  const getv=(f,i)=>SA?(seg===0?SA[i][0]:seg===1?SA[i][1]:SA[i][0]-SA[i][1]):V(c,f[1]);
  const mx=Math.max(...list.map((f,i)=>getv(f,i)),1);let prev=null,h='';
  list.forEach((f,i)=>{const [rw,gid]=f,lb=SL[rw]||rw,v=getv(f,i),w=Math.max(3,100*v/mx);
-  const dn0=(mode===1||isL)?prev:(i>0?getv(list[0],0):null);const cr=dn0!==null&&dn0>0?P(v,dn0):null;
-  const cc=cr===null?'none':((mode===1||isL)?(cr>=50?'good':cr>=25?'mid':'bad'):'none');
+  const cr=prev!==null&&prev>0?P(v,prev):null;
+  const cc=cr===null?'none':cr>=50?'good':cr>=25?'mid':'bad';
   let cls=rw.endsWith('_OK')?'okstep':'';if(rw==='CONFIRM_PAGE')cls='dropstep';
   if(seg===1)cls+=' seg1';
   h+=`<div class="step ${cls} ${open_.has(rw)?'open':''}"><div class="smain" onclick="tg('${rw}')">
    <div class="nm"><span class="ix">${isL?'—':String(i).padStart(2,'0')}</span>${lb}</div>
-   <div class="bw"><div class="bar" style="width:${w}%">${v>0&&w>=25?F(v):''}</div>${v>0&&w<25?`<span class="bout">${F(v)}</span>`:''}</div>
-   <div class="cr ${cc}" title="${(mode===1||isL)?'переход от предыдущего шага':'доля от «Открыли сайт»'}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
+   <div class="bw"><div class="bar" style="width:${w}%">${v>0?F(v):''}</div></div>
+   <div class="cr ${cc}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
    <div class="more">${open_.has(rw)?'Скрыть ▴':'Подробнее ▾'}</div></div>${det(rw,gid,c,v)}</div>`;
   if(v>0)prev=v;});
  return h;}
 function det(rw,gid,c,base){let h='<div class="det">';const rs=DATA.reasons[rw];
  if(mode===1&&DATA.funnel.some(f=>f[0]===rw)){const rawv=V(c,gid);
   h+=`<div class="dh">Всего побывало на экране <span>· ${F(rawv)} человек, включая тех, кто пришёл в обход воронки</span></div>`;}
- if(rs){const rows=rs.map(([nm,g])=>{const v=V(c,g),vv=VV(c,g);if(!v&&!vv)return'';
-  const w=nm.startsWith('⚠')?' w':'';const ua=UNANCH.has(g);const den=ua?0:V(c,gid);const s=den?`<span class="sub">${P(v,den).toFixed(1)}%</span>`:(ua?`<span class="sub" style="color:#d8455c">экран уточняется</span>`:'');
+ if(rs){const rows=rs.map(([nm,g])=>{const v=V(c,g);if(!v)return'';
+  const w=nm.startsWith('⚠')?' w':'';const s=base?`<span class="sub">${P(v,base).toFixed(1)}%</span>`:'';
   const cv=DATA.cov[g];const part=cv&&cv[2]<DATA.period[2]?` <span class="sub" style="color:#d8455c">только ${cv[0]}–${cv[1]}</span>`:'';
-  return `<div class="rr${w}"><span class="rn">${nm.replace('⚠ ','')}${part}</span><span class="rv">${F(v)}${s}${vv?`<span class="sub vis">· ${F(vv)} виз.</span>`:''}</span></div>`}).filter(Boolean).join('');
-  h+=`<div class="dh">События на шаге <span>· уникальные посетители, % от побывавших на экране; виз. — визиты с событием</span></div><div class="rgrid">${rows||'<span class="note">За период не зафиксировано</span>'}</div>`;}
+  return `<div class="rr${w}"><span class="rn">${nm.replace('⚠ ','')}${part}</span><span class="rv">${F(v)}${s}</span></div>`}).filter(Boolean).join('');
+  h+=`<div class="dh">События на шаге <span>· в визитах</span></div><div class="rgrid">${rows||'<span class="note">За период не зафиксировано</span>'}</div>`;}
  const D=DIM(gid);
- if(D){h+=`<div class="dh ${rs?'sec':''}">Разрезы посетителей шага <span>· ${D.lbl}${seg?', по всей аудитории':''} · % от посетителей шага; клиент может попасть в несколько источников</span></div><div class="dims">`;
+ if(D){h+=`<div class="dh ${rs?'sec':''}">Разрезы посетителей шага <span>· ${D.lbl}${seg?', по всей аудитории':''}</span></div><div class="dims">`;
   ['device','os','browser','source'].forEach(dn=>{const vs=D.d[dn];if(!vs)return;
-   const t=DIMBASE(gid)||vs.reduce((s,x)=>s+x[1],0)||1;
+   const t=vs.reduce((s,x)=>s+x[1],0)||1;
    h+=`<div class="db"><div class="dt">${DIMT[dn]}</div>`+vs.slice(0,6).map(([v,n])=>
     `<div class="dr"><div class="dl"><span>${DL(dn,v)}</span><span>${P(n,t).toFixed(0)}%</span></div>
      <div class="dbar"><i style="width:${P(n,t)}%"></i></div></div>`).join('')+`</div>`});

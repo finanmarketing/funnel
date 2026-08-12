@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import sys
@@ -88,6 +89,40 @@ def journal_end(run_id, status, rows=None, err=None):
     conn.close()
 
 
+def preflight(conn, d1, d2):
+    """Дешёвая проверка до тяжёлых расчётов. Стоит 2 секунды вместо 16 минут."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (VISITS,))
+        if cur.fetchone()[0] is None:
+            raise RuntimeError(
+                f"preflight: table {VISITS} does not exist. "
+                "Run: python pipeline\\ingest_metrica.py"
+            )
+        cur.execute(
+            f"SELECT min(load_date), max(load_date), count(distinct load_date) "
+            f"FROM {VISITS}"
+        )
+        mn, mx, ndays = cur.fetchone()
+    if mx is None:
+        raise RuntimeError(
+            f"preflight: {VISITS} is empty. Run: python pipeline\\ingest_metrica.py"
+        )
+    if str(mx) < d2:
+        raise RuntimeError(
+            f"preflight: data loaded up to {mx}, but {d2} requested. "
+            f"Load fresh data first: python pipeline\\run_pipeline.py  "
+            f"(or python pipeline\\ingest_metrica.py). "
+            f"To inspect existing data instead: "
+            f"python pipeline\\build_payload.py --date2 {mx}"
+        )
+    if str(mn) > d1:
+        raise RuntimeError(
+            f"preflight: earliest loaded day is {mn}, but period starts {d1}. "
+            "Backfill is incomplete."
+        )
+    log(f"preflight ok: loaded {mn}..{mx}, {ndays} days, target {d1}..{d2}")
+
+
 def build(conn, d1, d2):
     p = {"d1": d1, "d2": d2}
     cur = conn.cursor()
@@ -109,13 +144,15 @@ def build(conn, d1, d2):
             bucket.setdefault(k, {})[gid] = [a, n or 0]
         if level != "hour":
             cur.execute(
-                BASE + f"SELECT {expr} AS k, gid, count(distinct vid), "
+                BASE + f"SELECT {expr} AS k, gid, count(distinct cid), "
+                "count(distinct cid) FILTER (WHERE is_new), "
+                "count(distinct vid), "
                 "count(distinct vid) FILTER (WHERE is_new) "
                 "FROM e WHERE gid = ANY(%(ids)s) GROUP BY 1,2",
                 {**p, "ids": EVENT_IDS},
             )
-            for k, gid, a, n in cur.fetchall():
-                bucket.setdefault(k, {})[gid] = [a, n or 0]
+            for k, gid, a, n, va, vn in cur.fetchall():
+                bucket.setdefault(k, {})[gid] = [a, n or 0, va, vn or 0]
         payload[level] = bucket
         log(f"  level {level}: {len(bucket)} keys")
 
@@ -173,7 +210,7 @@ def build(conn, d1, d2):
         "SELECT entity_created::date::text, count(*) FROM public.clients "
         "WHERE entity_created >= %s AND entity_created::date <= %s "
         "GROUP BY 1 ORDER BY 1",
-        (START, d2),
+        (d1, d2),
     )
     payload["dbreg"] = {d: n for d, n in cur.fetchall()}
 
@@ -218,16 +255,51 @@ def quality_checks(payload, d2):
     missing = [n for n, g in FUNNEL if g not in day]
     if missing:
         raise RuntimeError(f"QC: steps missing on {d2}: {missing}")
+
+    step_of = dict(FUNNEL + LOGIN)
+    bad = []
+    for level in ("month", "week", "day"):
+        for k, goals in payload[level].items():
+            for rw, evs in REASONS.items():
+                gid = step_of.get(rw)
+                if not gid or gid not in goals:
+                    continue
+                den = goals[gid][0]
+                if den <= 0:
+                    continue
+                for nm, g in evs:
+                    val = goals.get(g)
+                    if val and val[0] > den:
+                        bad.append(f"{level}/{k}/{rw}/{nm}: {val[0]}>{den}")
+    if bad:
+        log(f"  QC WARNING: {len(bad)} event(s) exceed screen population")
+        for b in bad[:5]:
+            log(f"    {b}")
+    else:
+        log("  QC: no event exceeds its screen population")
     log(f"  QC ok: metrica={metrica} db={dbreg} gap={gap:.1f}%")
 
 
 def main():
-    d1 = START
-    d2 = (date.today() - timedelta(days=1)).isoformat()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date1", default=START)
+    ap.add_argument("--date2")
+    args = ap.parse_args()
+
+    d1 = args.date1
+    d2 = args.date2 or (date.today() - timedelta(days=1)).isoformat()
+
+    conn = connect()
+    try:
+        preflight(conn, d1, d2)
+    except Exception as e:
+        conn.close()
+        log(f"FAIL build_payload: {type(e).__name__}: {e}")
+        return 1
+
     run_id = journal_start("build_payload")
     try:
         log(f"building payload {d1}..{d2}")
-        conn = connect()
         payload = build(conn, d1, d2)
         conn.close()
         quality_checks(payload, d2)
