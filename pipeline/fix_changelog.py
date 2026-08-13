@@ -1,22 +1,11 @@
-# Журнал изменений БД dwh_ezru_loans
+import os
+import sys
 
-## 2026-08-02 — Ф1.1 (E. Rybakov)
-**Что сделано:** создана схема `metrica_raw` + таблицы `goals_dict`, `pipeline_runs` + 2 индекса.
-**Схема public:** не затронута, доступ только на чтение (`public.clients`).
-**Откат:** `pipeline/sql/99_rollback_metrica_raw.sql` — сносит схему целиком, побочных эффектов нет.
-**Проверено до накатки:** схемы `metrica_raw` в базе не существовало.
-**Контроль после:** 2 таблицы, INSERT/DELETE smoke-тест пройден.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PATH = os.path.join(BASE_DIR, "state", "db_changelog.md")
+MARKER = "## 2026-08-13"
 
-# Журнал изменений БД dwh_ezru_loans
-
-## 2026-08-02 — Ф1.1 (E. Rybakov, учётка risk_erybakov)
-**Права:** CREATE SCHEMA недоступен (DB CREATE=False). Работаем внутри существующей схемы `dwh_ezru_loans` по роли `dwh_ezru_loans_rw`.
-**Создано:** `dwh_ezru_loans.metrica_goals_dict`, `dwh_ezru_loans.metrica_pipeline_runs` + индексы `ix_metrica_runs_started`, `ix_metrica_runs_stage_status`.
-**Схема public:** не затронута. Доступ к `public.clients` только на чтение.
-**Изоляция:** все объекты пайплайна имеют префикс `metrica_`. Соседние таблицы схемы не трогаются.
-**Откат:** `pipeline/sql/99_rollback_metrica_raw.sql` — DROP трёх таблиц поимённо. DROP SCHEMA запрещён: схема чужая.
-**Проверено до накатки:** таблиц с префиксом `metrica%` в схеме не было (0 строк).
-
+ENTRY = """
 ## 2026-08-13. Переход на подсчёт людей вместо браузеров
 
 Единица счёта изменена: браузер (clientID) -> человек.
@@ -41,3 +30,45 @@ ym_s_clientid = clients.client_number. Это неверно.
 ym_s_clientid - внутренний идентификатор Метрики (до 20 знаков),
 к номерам клиентов отношения не имеет. Связь идёт через параметр
 UserID внутри визита (parsedParamsKey1..3, плоская и вложенная формы).
+"""
+
+
+def read_any(path):
+    with open(path, "rb") as f:
+        raw = f.read()
+    for enc in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            return raw.decode(enc), enc
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace"), "utf-8/replace"
+
+
+def main():
+    if not os.path.exists(PATH):
+        print(f"FAIL: {PATH} not found")
+        return 1
+    text, enc = read_any(PATH)
+    print(f"read as {enc}: {len(text)} chars")
+
+    idx = text.find(MARKER)
+    if idx >= 0:
+        text = text[:idx].rstrip()
+        print(f"removed broken entry at {idx}")
+    else:
+        text = text.rstrip()
+        print("no previous entry, appending")
+
+    text += "\n" + ENTRY
+    with open(PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    print(f"written as utf-8: {len(text)} chars")
+
+    check, enc2 = read_any(PATH)
+    print(f"verify: reads back as {enc2}, "
+          f"marker {'present' if MARKER in check else 'MISSING'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
