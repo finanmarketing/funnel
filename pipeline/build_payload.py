@@ -7,14 +7,15 @@ from datetime import date, datetime, timedelta
 import psycopg2
 from dotenv import load_dotenv
 
-from funnel_goals import (APPLY, EVENT_IDS, FUNNEL, LOGIN, OTHER, REASONS,
-                          STEP_IDS)
+from funnel_goals import (APPLY, CHAINS, EVENT_IDS, FUNNEL, LOGIN, OTHER, PWA,
+                          REASONS, RECOVERY, STEP_IDS)
 
 load_dotenv()
 
 SCHEMA = os.environ["PG_SCHEMA"]
 PREFIX = os.environ["TABLE_PREFIX"]
 VISITS = f"{SCHEMA}.{PREFIX}visits"
+PMAP = f"{SCHEMA}.{PREFIX}person_map"
 RUNS = f"{SCHEMA}.{PREFIX}pipeline_runs"
 START = os.environ.get("BACKFILL_START", "2026-05-01")
 OUT = os.path.join("state", "payload.json")
@@ -32,16 +33,22 @@ DIMS = {
     "source": "coalesce(nullif(src,''),'-')",
 }
 
+# cid здесь — КЛЮЧ ЧЕЛОВЕКА (pkey), а не идентификатор браузера.
+# pkey = UserID из parsedParams, если он есть, иначе 'br:' + clientID.
+# Имя оставлено прежним, чтобы не менять остальную логику.
 BASE = f"""
 WITH v AS (
-  SELECT ym_s_clientid AS cid, ym_s_visitid AS vid, load_date AS d,
-         ym_s_datetime AS dt, (ym_s_isnewuser = '1') AS newflag,
-         ym_s_devicecategory AS devcat, ym_s_operatingsystem AS osname,
-         ym_s_browserengine AS brengine,
-         CASE WHEN ym_s_lasttrafficsource = 'undefined' THEN '-'
-              ELSE ym_s_lasttrafficsource END AS src,
-         nullif(trim(both '[]' from coalesce(ym_s_goalsid,'')),'') AS gs
-  FROM {VISITS} WHERE load_date BETWEEN %(d1)s AND %(d2)s
+  SELECT coalesce(pm.pkey, 'br:' || t.ym_s_clientid) AS cid,
+         t.ym_s_visitid AS vid, t.load_date AS d,
+         t.ym_s_datetime AS dt, (t.ym_s_isnewuser = '1') AS newflag,
+         t.ym_s_devicecategory AS devcat, t.ym_s_operatingsystem AS osname,
+         t.ym_s_browserengine AS brengine,
+         CASE WHEN t.ym_s_lasttrafficsource = 'undefined' THEN '-'
+              ELSE t.ym_s_lasttrafficsource END AS src,
+         nullif(trim(both '[]' from coalesce(t.ym_s_goalsid,'')),'') AS gs
+  FROM {VISITS} t
+  LEFT JOIN {PMAP} pm ON pm.cid = t.ym_s_clientid
+  WHERE t.load_date BETWEEN %(d1)s AND %(d2)s
 ),
 nu AS (SELECT DISTINCT cid FROM v WHERE newflag),
 e AS (
@@ -91,7 +98,6 @@ def journal_end(run_id, status, rows=None, err=None):
 
 
 def preflight(conn, d1, d2):
-    """Дешёвая проверка до тяжёлых расчётов."""
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (VISITS,))
         if cur.fetchone()[0] is None:
@@ -99,26 +105,43 @@ def preflight(conn, d1, d2):
                 f"preflight: table {VISITS} does not exist. "
                 "Run: python pipeline\\ingest_metrica.py"
             )
+        cur.execute("SELECT to_regclass(%s)", (PMAP,))
+        if cur.fetchone()[0] is None:
+            raise RuntimeError(
+                f"preflight: table {PMAP} does not exist. Run: "
+                "python pipeline\\apply_sql.py pipeline\\sql\\"
+                "02_create_person_map.sql && python pipeline\\build_person_map.py"
+            )
         cur.execute(
             f"SELECT min(load_date), max(load_date), count(distinct load_date) "
             f"FROM {VISITS}"
         )
         mn, mx, ndays = cur.fetchone()
-    if mx is None:
-        raise RuntimeError(
-            f"preflight: {VISITS} is empty. Run: python pipeline\\ingest_metrica.py"
+        cur.execute(
+            f"SELECT count(*) FROM {VISITS} t LEFT JOIN {PMAP} pm "
+            "ON pm.cid = t.ym_s_clientid WHERE pm.cid IS NULL "
+            "AND t.load_date BETWEEN %s AND %s", (d1, d2),
         )
+        unmapped = cur.fetchone()[0]
+    if mx is None:
+        raise RuntimeError(f"preflight: {VISITS} is empty.")
     if str(mx) < d2:
         raise RuntimeError(
             f"preflight: data loaded up to {mx}, but {d2} requested. "
-            f"Load fresh data first: python pipeline\\run_pipeline.py  "
+            f"Run: python pipeline\\run_pipeline.py  "
             f"(or inspect existing: build_payload.py --date2 {mx})"
         )
     if str(mn) > d1:
         raise RuntimeError(
             f"preflight: earliest loaded day is {mn}, but period starts {d1}."
         )
-    log(f"preflight ok: loaded {mn}..{mx}, {ndays} days, target {d1}..{d2}")
+    if unmapped:
+        raise RuntimeError(
+            f"preflight: {unmapped} visits have no entry in {PMAP}. "
+            "Run: python pipeline\\build_person_map.py"
+        )
+    log(f"preflight ok: loaded {mn}..{mx}, {ndays} days, target {d1}..{d2}, "
+        "person map complete")
 
 
 def build(conn, d1, d2):
@@ -128,8 +151,11 @@ def build(conn, d1, d2):
         "funnel": [[n, g] for n, g in FUNNEL],
         "login": [[n, g] for n, g in LOGIN],
         "apply": [[n, g] for n, g in APPLY],
+        "recovery": [[n, g] for n, g in RECOVERY],
+        "pwa": [[n, g] for n, g in PWA],
         "other": [[n, g] for n, g in OTHER],
         "reasons": {k: [[n, g] for n, g in v] for k, v in REASONS.items()},
+        "unit": "person",
     }
     for level, expr in KEYS.items():
         bucket = {}
@@ -255,7 +281,11 @@ def quality_checks(payload, d2):
     if missing:
         raise RuntimeError(f"QC: steps missing on {d2}: {missing}")
 
-    step_of = dict(FUNNEL + LOGIN + APPLY)
+    step_of = {}
+    for lst in CHAINS:
+        for n, g in lst:
+            step_of.setdefault(n, g)
+
     bad = []
     for level in ("month", "week", "day"):
         for k, goals in payload[level].items():
@@ -298,7 +328,7 @@ def main():
 
     run_id = journal_start("build_payload")
     try:
-        log(f"building payload {d1}..{d2}")
+        log(f"building payload {d1}..{d2} (unit: person)")
         payload = build(conn, d1, d2)
         conn.close()
         quality_checks(payload, d2)

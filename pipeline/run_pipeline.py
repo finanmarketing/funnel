@@ -33,7 +33,9 @@ REQUIRED_MODULES = ("requests", "psycopg2", "dotenv")
 STAGES = [
     ("sync_goals", "sync_goals.py", []),
     ("ingest_metrica", "ingest_metrica.py", []),
+    ("build_person_map", "build_person_map.py", []),
     ("build_payload", "build_payload.py", []),
+    ("check_history", "check_history.py", []),
     ("render_dashboard", "render_dashboard.py", []),
     ("deliver", "deliver.py", []),
 ]
@@ -44,6 +46,8 @@ FATAL_MARKERS = (
     "SyntaxError",
     "IndentationError",
     "FileNotFoundError",
+    "ИСТОРИЯ ИЗМЕНИЛАСЬ",
+    "ЭТАЛОН НЕ СХОДИТСЯ",
     "KeyError: 'PG_",
     "KeyError: 'SMTP_",
     "KeyError: 'METRICA_",
@@ -59,7 +63,6 @@ def tcp_alive(host, port, timeout=5):
 
 
 def check_interpreter(emit):
-    """Дешёвая проверка окружения до любых этапов."""
     emit(f"interpreter: {PYTHON_EXE}")
     if not os.path.exists(PYTHON_EXE):
         raise RuntimeError(f"interpreter not found: {PYTHON_EXE}")
@@ -84,8 +87,8 @@ def check_interpreter(emit):
     if missing:
         raise RuntimeError(
             f"missing modules in {PYTHON_EXE}: {missing}. "
-            "Either set PYTHON_EXE in .env to the interpreter that has them, "
-            f"or install: \"{PYTHON_EXE}\" -m pip install {missing.replace(',', ' ')}"
+            f"Install: \"{PYTHON_EXE}\" -m pip install "
+            f"{missing.replace(',', ' ')}"
         )
     emit("modules ok: " + ", ".join(REQUIRED_MODULES))
 
@@ -171,14 +174,15 @@ def run_stage(emit, name, script, extra):
             cwd=BASE_DIR, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
         )
-        for line in (proc.stdout or "").splitlines():
+        out = proc.stdout or ""
+        for line in out.splitlines():
             emit(f"    {line}")
         if proc.returncode == 0:
             emit(f"--- stage {name} ok in {time.time() - s0:.0f}s ---")
             return True, ""
         for line in (proc.stderr or "").splitlines():
             emit(f"  ERR {line}")
-        last_err = (proc.stderr or proc.stdout or "")[-1500:]
+        last_err = ((proc.stderr or "") + "\n" + out)[-1500:]
         emit(f"--- stage {name} FAILED (rc={proc.returncode}) after "
              f"{time.time() - s0:.0f}s ---")
         if is_fatal(last_err):
@@ -224,8 +228,8 @@ def main():
     cleanup_stale_runs(emit)
 
     for name, script, extra in STAGES:
-        ok, err = run_stage(emit, name, script, extra)
-        if not ok:
+        ok_, err = run_stage(emit, name, script, extra)
+        if not ok_:
             emit(f"=== PIPELINE FAILED at stage: {name} ===")
             if name != "deliver":
                 notify_failure(emit, name, err)
