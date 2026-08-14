@@ -171,10 +171,6 @@ padding:2px 6px;border-radius:4px;white-space:nowrap}
  <div class="funnel" id="loginf"></div>
  <div class="sh"><h3>Заявка и решение</h3><span class="mode" style="border:none;background:none;color:var(--faint);font-weight:400">общий этап для новых и повторных клиентов · доли от экрана выплаты</span></div>
  <div class="funnel" id="applyf"></div>
- <div class="sh"><h3>Восстановление доступа</h3><span class="mode" style="border:none;background:none;color:var(--faint);font-weight:400">сценарий доступен с нескольких экранов · доли от «Забыл пароль»</span></div>
- <div class="funnel" id="recoveryf"></div>
- <div class="sh"><h3>Запуск и установка приложения</h3><span class="mode" style="border:none;background:none;color:var(--faint);font-weight:400">способ запуска и воронка установки PWA · доли от «Запуск из браузера»</span></div>
- <div class="funnel" id="pwaf"></div>
  <div class="sh"><h3>Прочие события сайта</h3></div>
  <div class="othr"><div class="rgrid" id="other"></div></div>
 </div>
@@ -209,7 +205,7 @@ function DIM(g){const dm=DATA.dim;
   return Object.keys(o).length?{d:o,lbl:'за весь период'}:null;}
  const m=curMonth();const s=m&&dm[m]?dm[m][g]:null;
  return s?{d:s,lbl:st.level==='month'?'за '+m:'за месяц '+m}:null;}
-const UNANCH=new Set([]);SL['PAYMENT_PAGE']='Экран выплаты';SL['REJECT_PAGE']='Страница отказа';SL['TERMS_CHANGE_PAGE']='Смена условий';SL['OTHER_OFFERS_PAGE']='Другие предложения';SL['FORGOT_PASSWORD']='Забыл пароль';SL['FORGOT_PHONE']='Забыл телефон';SL['FORGOT_PHONE_COMPLETE']='Телефон восстановлен';SL['FORGOT_EMAIL']='Забыл e-mail';SL['FORGOT_EMAIL_COMPLETE']='E-mail восстановлен';SL['PWA_LAUNCH_WEB']='Запуск из браузера';SL['PWA_LAUNCH_PWA']='Запуск из приложения';SL['PWA_INSTALL_AVAILABLE']='Установка предложена';SL['PWA_INSTALL_ACCEPTED']='Согласились установить';SL['PWA_INSTALLED']='Приложение установлено';SL['PWA_INSTALL_DISMISSED']='Отказались от установки';function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
+const UNANCH=new Set(['465920058']);SL['PAYMENT_PAGE']='Экран выплаты';SL['REJECT_PAGE']='Страница отказа';function DIMBASE(g){if(st.level==='all'){let t=0;for(const m in DATA.month){const v=DATA.month[m][g];if(v)t+=seg===0?v[0]:seg===1?v[1]:v[0]-v[1];}return t;}const m=curMonth();const v=m&&DATA.month[m]?DATA.month[m][g]:null;return v?(seg===0?v[0]:seg===1?v[1]:v[0]-v[1]):0;}const F=n=>(n||0).toLocaleString('ru-RU'),P=(a,b)=>b?100*a/b:0;
 function strictArr(){const S=DATA.strict;if(!S)return null;
  if(st.level==='all'){const ms=DATA.nav.months.map(m=>S.month[m]).filter(Boolean);
   if(!ms.length)return null;
@@ -250,8 +246,6 @@ function render(){const c=raw();
  document.getElementById('funnel').innerHTML=chain(DATA.funnel,c);
  document.getElementById('loginf').innerHTML=chain(DATA.login,c,true);
  document.getElementById('applyf').innerHTML=chain(DATA.apply||[],c,true,true);
- document.getElementById('recoveryf').innerHTML=chain(DATA.recovery||[],c,true,true);
- document.getElementById('pwaf').innerHTML=chain(DATA.pwa||[],c,true,true);
  document.getElementById('other').innerHTML=DATA.other.map(([nm,g])=>{const v=V(c,g);
   return v?`<div class="rr"><span class="rn">${nm}</span><span class="rv">${F(v)}</span></div>`:''}).join('')
   ||'<span class="note">За период событий не зафиксировано</span>';
@@ -268,7 +262,7 @@ function chain(list,c,isL,isF){
   h+=`<div class="step ${cls} ${open_.has(rw)?'open':''}"><div class="smain" onclick="tg('${rw}')">
    <div class="nm"><span class="ix">${isL?'—':String(i).padStart(2,'0')}</span>${lb}</div>
    <div class="bw"><div class="bar" style="width:${w}%">${v>0&&w>=25?F(v):''}</div>${v>0&&w<25?`<span class="bout">${F(v)}</span>`:''}</div>
-   <div class="cr ${cc}" title="${isF?('доля от «'+(SL[list[0][0]]||list[0][0])+'»'):(mode===1||isL)?'переход от предыдущего шага':'доля от «Открыли сайт»'}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
+   <div class="cr ${cc}" title="${isF?'доля от «Экран выплаты»':(mode===1||isL)?'переход от предыдущего шага':'доля от «Открыли сайт»'}">${cr===null?'—':cr.toFixed(1)+'%'}</div>
    <div class="more">${open_.has(rw)?'Скрыть ▴':'Подробнее ▾'}</div></div>${det(rw,gid,c,v)}</div>`;
   if(v>0)prev=v;});
  return h;}

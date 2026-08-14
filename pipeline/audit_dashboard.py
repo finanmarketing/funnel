@@ -8,10 +8,7 @@ TPL = os.path.join(BASE_DIR, "pipeline", "dashboard_template.html")
 HTML = os.path.join(BASE_DIR, "out", "funnel_dashboard_latest.html")
 
 TOL = 101.0
-
-UNANCHORED = {
-    "465920058": "заход-браузер",
-}
+UNANCHORED = {}
 
 MARKERS = [
     ("p1 helper VV", "function VV(c,g)"),
@@ -31,12 +28,28 @@ MARKERS = [
     ("p3 db gap raw", "V(c,REGOK)/dbn"),
     ("p3 all-level warning", "суммируются по месяцам"),
     ("p4 apply container", 'id="applyf"'),
-    ("p4 apply labels", "SL['PAYMENT_PAGE']"),
     ("p4 chain signature", "function chain(list,c,isL,isF)"),
     ("p4 chain denominator", "dn0=(!isF&&(mode===1||isL))"),
-    ("p4 apply tooltip", "доля от «Экран выплаты»"),
     ("p4 apply render", "chain(DATA.apply"),
+    ("p5 generic tooltip", "'доля от «'+(SL[list[0][0]]"),
+    ("p5 recovery container", 'id="recoveryf"'),
+    ("p5 pwa container", 'id="pwaf"'),
+    ("p5 recovery render", "chain(DATA.recovery"),
+    ("p5 pwa render", "chain(DATA.pwa"),
+    ("p5 recovery labels", "SL['FORGOT_PASSWORD']"),
+    ("p5 pwa labels", "SL['PWA_LAUNCH_WEB']"),
 ]
+
+CHAIN_KEYS = [("apply", "Заявка и решение"),
+              ("recovery", "Восстановление доступа"),
+              ("pwa", "Запуск и установка приложения")]
+
+# Steps that must not exceed the previous one within a chain.
+CHAIN_MONOTONIC = {
+    "pwa": [("PWA_INSTALLED", "PWA_INSTALL_ACCEPTED")],
+    "recovery": [("FORGOT_PHONE_COMPLETE", "FORGOT_PHONE"),
+                 ("FORGOT_EMAIL_COMPLETE", "FORGOT_EMAIL")],
+}
 
 fails = []
 warns = []
@@ -70,10 +83,18 @@ def load_payload(path):
 
 def steps_map(D):
     m = {}
-    for key in ("funnel", "login", "apply"):
+    for key in ("funnel", "login", "apply", "recovery", "pwa"):
         for pair in D.get(key, []):
-            m[pair[0]] = pair[1]
+            m.setdefault(pair[0], pair[1])
     return m
+
+
+def month_covered(D, gid, mo):
+    """True if the goal has data inside that month."""
+    cov = D["cov"].get(gid)
+    if not cov:
+        return False
+    return cov[0][:7] <= mo <= cov[1][:7]
 
 
 def check_markers():
@@ -91,7 +112,7 @@ def check_period(D):
     print("\n[2] Период и непрерывность дней")
     p = D["period"]
     days = sorted(D["day"].keys())
-    ok(f"период {p[0]}..{p[1]}, {p[2]} дней")
+    ok(f"период {p[0]}..{p[1]}, {p[2]} дней, единица: {D.get('unit', '?')}")
     d1, d2 = date.fromisoformat(p[0]), date.fromisoformat(p[1])
     expect = (d2 - d1).days + 1
     if expect != p[2]:
@@ -165,35 +186,57 @@ def check_events(D):
                 fail(line)
             else:
                 ok(f"{line} — в пределах допуска разметки {TOL - 100:.0f}%")
-    print(f"  (помечены как непривязанные: {', '.join(UNANCHORED.values())})")
 
 
-def check_apply(D):
-    print("\n[6] Цепочка «Заявка и решение»")
-    ap = D.get("apply")
-    if not ap:
-        fail("ключ apply отсутствует в payload — build_payload не пересчитан")
-        return
-    names = [x[0] for x in ap]
-    ok(f"шаги: {' -> '.join(names)}")
-    base_g = ap[0][1]
-    for mo in D["nav"]["months"]:
-        c = D["month"][mo]
-        base = c.get(base_g, [0])[0]
-        if base <= 0:
-            fail(f"{mo}: PAYMENT_PAGE = 0")
+def check_chains(D):
+    print("\n[6] Дополнительные цепочки")
+    total_days = D["period"][2]
+    for key, title in CHAIN_KEYS:
+        ch = D.get(key)
+        if not ch:
+            fail(f"{title}: ключ '{key}' отсутствует в payload")
             continue
-        parts = []
-        for nm, g in ap:
-            v = c.get(g, [0])[0]
-            parts.append(f"{nm}={v} ({100.0 * v / base:.1f}%)")
-            if v > base * 1.01 and g != base_g:
-                fail(f"{mo}/{nm}: {v} > PAYMENT_PAGE {base}")
-        print(f"  INFO  {mo}: {', '.join(parts)}")
-    for nm, g in ap:
-        missing = [d for d in D["day"] if g not in D["day"][d]]
-        if missing:
-            warn(f"{nm}: нет данных в {len(missing)} днях")
+        names = [x[0] for x in ch]
+        gid_of = {n: g for n, g in ch}
+        ok(f"{title}: {' -> '.join(names)}")
+        base_g = ch[0][1]
+        for mo in D["nav"]["months"]:
+            c = D["month"][mo]
+            base = c.get(base_g, [0])[0]
+            if base <= 0:
+                if not month_covered(D, base_g, mo):
+                    print(f"  INFO  {mo}: цель-база ещё не размечена, "
+                          "месяц пропущен")
+                else:
+                    fail(f"{title} / {mo}: база = 0 при наличии покрытия")
+                continue
+            parts = []
+            for nm, g in ch:
+                v = c.get(g, [0])[0]
+                cov = D["cov"].get(g)
+                mark = ""
+                if cov and cov[2] < total_days:
+                    mark = f" [с {cov[0]}]"
+                parts.append(f"{nm}={v} ({100.0 * v / base:.1f}%){mark}")
+                if v > base * 1.01 and g != base_g:
+                    fail(f"{title} / {mo} / {nm}: {v} > базы {base}")
+            print(f"  INFO  {mo}: {', '.join(parts)}")
+            for child, parent in CHAIN_MONOTONIC.get(key, []):
+                cg, pg = gid_of.get(child), gid_of.get(parent)
+                if not cg or not pg:
+                    continue
+                cv, pv = c.get(cg, [0])[0], c.get(pg, [0])[0]
+                if pv > 0 and cv > pv * 1.01:
+                    fail(f"{title} / {mo}: {child}={cv} > {parent}={pv}")
+                elif pv > 0 and cv > pv:
+                    warn(f"{title} / {mo}: {child}={cv} чуть больше "
+                         f"{parent}={pv} (погрешность разметки)")
+        for nm, g in ch:
+            cov = D["cov"].get(g)
+            if cov and cov[2] < total_days:
+                warn(f"{title} / {nm}: данные с {cov[0]} "
+                     f"({cov[2]} из {total_days} дней) — проценты по месяцам "
+                     "несопоставимы")
 
 
 def check_events_format(D):
@@ -291,7 +334,7 @@ def main():
     check_strict(D)
     check_segments(D)
     check_events(D)
-    check_apply(D)
+    check_chains(D)
     check_events_format(D)
     check_dims(D)
     check_db(D)
