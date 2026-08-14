@@ -30,6 +30,10 @@ STALE_RUN_HOURS = int(os.environ.get("STALE_RUN_HOURS", "6"))
 PYTHON_EXE = os.environ.get("PYTHON_EXE") or sys.executable
 REQUIRED_MODULES = ("requests", "psycopg2", "dotenv")
 
+CHILD_ENV = dict(os.environ)
+CHILD_ENV["PYTHONIOENCODING"] = "utf-8"
+CHILD_ENV["PYTHONUTF8"] = "1"
+
 STAGES = [
     ("sync_goals", "sync_goals.py", []),
     ("ingest_metrica", "ingest_metrica.py", []),
@@ -48,6 +52,8 @@ FATAL_MARKERS = (
     "FileNotFoundError",
     "ИСТОРИЯ ИЗМЕНИЛАСЬ",
     "ЭТАЛОН НЕ СХОДИТСЯ",
+    "preflight:",
+    "QC:",
     "KeyError: 'PG_",
     "KeyError: 'SMTP_",
     "KeyError: 'METRICA_",
@@ -66,31 +72,15 @@ def check_interpreter(emit):
     emit(f"interpreter: {PYTHON_EXE}")
     if not os.path.exists(PYTHON_EXE):
         raise RuntimeError(f"interpreter not found: {PYTHON_EXE}")
-    code = (
-        "import sys;"
-        f"mods={list(REQUIRED_MODULES)!r};"
-        "missing=[];\n"
-        "for m in mods:\n"
-        "    try: __import__(m)\n"
-        "    except Exception: missing.append(m)\n"
-        "print(sys.version.split()[0], '|', ','.join(missing))"
-    )
     proc = subprocess.run(
-        [PYTHON_EXE, "-c", code], capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+        [PYTHON_EXE, os.path.join(PIPE_DIR, "doctor.py")],
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", env=CHILD_ENV, cwd=BASE_DIR,
     )
-    out = (proc.stdout or "").strip()
-    if proc.returncode != 0 or "|" not in out:
-        raise RuntimeError(f"interpreter probe failed: {proc.stderr[:300]}")
-    ver, missing = [x.strip() for x in out.split("|", 1)]
-    emit(f"python version: {ver}")
-    if missing:
-        raise RuntimeError(
-            f"missing modules in {PYTHON_EXE}: {missing}. "
-            f"Install: \"{PYTHON_EXE}\" -m pip install "
-            f"{missing.replace(',', ' ')}"
-        )
-    emit("modules ok: " + ", ".join(REQUIRED_MODULES))
+    for line in (proc.stdout or "").splitlines():
+        emit(f"  {line}")
+    if proc.returncode != 0:
+        raise RuntimeError("environment check failed, see output above")
 
 
 def wait_for_db(emit, label):
@@ -172,7 +162,7 @@ def run_stage(emit, name, script, extra):
         proc = subprocess.run(
             [PYTHON_EXE, path] + extra,
             cwd=BASE_DIR, capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=CHILD_ENV,
         )
         out = proc.stdout or ""
         for line in out.splitlines():
@@ -222,7 +212,7 @@ def main():
         emit("=== PIPELINE ABORTED: no network ===")
         notify_failure(emit, "startup",
                        "Корпоративный VPN не поднялся за "
-                       f"{NET_WAIT_SECONDS // 60} минут. Пайплайн не запускался.")
+                       f"{NET_WAIT_SECONDS // 60} минут.")
         return 1
 
     cleanup_stale_runs(emit)

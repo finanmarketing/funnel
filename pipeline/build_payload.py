@@ -20,6 +20,8 @@ RUNS = f"{SCHEMA}.{PREFIX}pipeline_runs"
 START = os.environ.get("BACKFILL_START", "2026-05-01")
 OUT = os.path.join("state", "payload.json")
 
+NEEDED_IDS = list(dict.fromkeys(STEP_IDS + EVENT_IDS))
+
 KEYS = {
     "month": "to_char(d,'YYYY-MM')",
     "week": "to_char(d,'IYYY-\"W\"IW')",
@@ -33,30 +35,40 @@ DIMS = {
     "source": "coalesce(nullif(src,''),'-')",
 }
 
-# cid здесь — КЛЮЧ ЧЕЛОВЕКА (pkey), а не идентификатор браузера.
-# pkey = UserID из parsedParams, если он есть, иначе 'br:' + clientID.
-# Имя оставлено прежним, чтобы не менять остальную логику.
-BASE = f"""
-WITH v AS (
-  SELECT coalesce(pm.pkey, 'br:' || t.ym_s_clientid) AS cid,
-         t.ym_s_visitid AS vid, t.load_date AS d,
-         t.ym_s_datetime AS dt, (t.ym_s_isnewuser = '1') AS newflag,
-         t.ym_s_devicecategory AS devcat, t.ym_s_operatingsystem AS osname,
-         t.ym_s_browserengine AS brengine,
-         CASE WHEN t.ym_s_lasttrafficsource = 'undefined' THEN '-'
-              ELSE t.ym_s_lasttrafficsource END AS src,
-         nullif(trim(both '[]' from coalesce(t.ym_s_goalsid,'')),'') AS gs
-  FROM {VISITS} t
-  LEFT JOIN {PMAP} pm ON pm.cid = t.ym_s_clientid
-  WHERE t.load_date BETWEEN %(d1)s AND %(d2)s
-),
-nu AS (SELECT DISTINCT cid FROM v WHERE newflag),
-e AS (
-  SELECT v.cid, v.vid, v.d, v.dt, v.devcat, v.osname, v.brengine, v.src,
-         g.gid, (nu.cid IS NOT NULL) AS is_new
-  FROM v CROSS JOIN LATERAL unnest(string_to_array(v.gs, ',')) AS g(gid)
-  LEFT JOIN nu ON nu.cid = v.cid WHERE v.gs IS NOT NULL
-)
+# Step 1: one pass over visits, attach the person key.
+VIS = f"""
+CREATE TEMP TABLE vis AS
+SELECT coalesce(pm.pkey, 'br:' || t.ym_s_clientid) AS pkey,
+       t.ym_s_visitid AS vid, t.load_date AS d,
+       t.ym_s_datetime AS dt, (t.ym_s_isnewuser = '1') AS newflag,
+       t.ym_s_devicecategory AS devcat, t.ym_s_operatingsystem AS osname,
+       t.ym_s_browserengine AS brengine,
+       CASE WHEN t.ym_s_lasttrafficsource = 'undefined' THEN '-'
+            ELSE t.ym_s_lasttrafficsource END AS src,
+       nullif(trim(both '[]' from coalesce(t.ym_s_goalsid,'')),'') AS gs
+FROM {VISITS} t
+LEFT JOIN {PMAP} pm ON pm.cid = t.ym_s_clientid
+WHERE t.load_date BETWEEN %(d1)s AND %(d2)s
+"""
+
+# Step 2: is_new is derived from ALL visits of the person, including visits
+# that carry no tracked goals. Deriving it from goal rows would silently
+# drop people whose first visit had no tracked goal.
+PERSONS = """
+CREATE TEMP TABLE pers AS
+SELECT pkey, row_number() OVER (ORDER BY pkey)::int AS cid,
+       bool_or(newflag) AS is_new
+FROM vis GROUP BY pkey
+"""
+
+# Step 3: explode goals, keep only the ones the report uses.
+EMAT = """
+CREATE TEMP TABLE emat AS
+SELECT p.cid, v.vid, v.d, v.dt, v.devcat, v.osname, v.brengine, v.src,
+       g.gid, p.is_new
+FROM vis v JOIN pers p ON p.pkey = v.pkey
+CROSS JOIN LATERAL unnest(string_to_array(v.gs, ',')) AS g(gid)
+WHERE v.gs IS NOT NULL AND g.gid = ANY(%(ids)s)
 """
 
 
@@ -103,14 +115,13 @@ def preflight(conn, d1, d2):
         if cur.fetchone()[0] is None:
             raise RuntimeError(
                 f"preflight: table {VISITS} does not exist. "
-                "Run: python pipeline\\ingest_metrica.py"
+                "Run: run pipeline\\ingest_metrica.py"
             )
         cur.execute("SELECT to_regclass(%s)", (PMAP,))
         if cur.fetchone()[0] is None:
             raise RuntimeError(
-                f"preflight: table {PMAP} does not exist. Run: "
-                "python pipeline\\apply_sql.py pipeline\\sql\\"
-                "02_create_person_map.sql && python pipeline\\build_person_map.py"
+                f"preflight: table {PMAP} does not exist. "
+                "Run: run pipeline\\build_person_map.py"
             )
         cur.execute(
             f"SELECT min(load_date), max(load_date), count(distinct load_date) "
@@ -128,7 +139,7 @@ def preflight(conn, d1, d2):
     if str(mx) < d2:
         raise RuntimeError(
             f"preflight: data loaded up to {mx}, but {d2} requested. "
-            f"Run: python pipeline\\run_pipeline.py  "
+            f"Run: run pipeline\\run_pipeline.py  "
             f"(or inspect existing: build_payload.py --date2 {mx})"
         )
     if str(mn) > d1:
@@ -137,15 +148,56 @@ def preflight(conn, d1, d2):
         )
     if unmapped:
         raise RuntimeError(
-            f"preflight: {unmapped} visits have no entry in {PMAP}. "
-            "Run: python pipeline\\build_person_map.py"
+            f"preflight: {unmapped} visits missing from {PMAP}. "
+            "Run: run pipeline\\build_person_map.py"
         )
     log(f"preflight ok: loaded {mn}..{mx}, {ndays} days, target {d1}..{d2}, "
         "person map complete")
 
 
+def materialize(conn, d1, d2):
+    cur = conn.cursor()
+    for stmt in ("SET temp_buffers = '512MB'", "SET work_mem = '256MB'"):
+        try:
+            cur.execute(stmt)
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
+            log(f"  cannot apply: {stmt}")
+
+    t0 = datetime.now()
+    for t in ("emat", "pers", "vis"):
+        cur.execute(f"DROP TABLE IF EXISTS {t}")
+    conn.commit()
+
+    cur.execute(VIS, {"d1": d1, "d2": d2})
+    conn.commit()
+    cur.execute("SELECT count(*) FROM vis")
+    nvis = cur.fetchone()[0]
+    log(f"  vis: {nvis} visits ({(datetime.now() - t0).seconds}s)")
+
+    cur.execute(PERSONS)
+    cur.execute("CREATE INDEX ON pers (pkey)")
+    cur.execute("ANALYZE pers")
+    conn.commit()
+    cur.execute("SELECT count(*), count(*) FILTER (WHERE is_new) FROM pers")
+    npers, nnew = cur.fetchone()
+    log(f"  persons: {npers} (new {nnew})")
+
+    cur.execute(EMAT, {"ids": NEEDED_IDS})
+    cur.execute("DROP TABLE vis")
+    cur.execute("CREATE INDEX ON emat (gid)")
+    cur.execute("ANALYZE emat")
+    conn.commit()
+    cur.execute("SELECT count(*), count(distinct vid) FROM emat")
+    rows, visits = cur.fetchone()
+    log(f"  materialized: {rows} goal-rows, {visits} visits "
+        f"(total {(datetime.now() - t0).seconds}s)")
+    cur.close()
+    return rows
+
+
 def build(conn, d1, d2):
-    p = {"d1": d1, "d2": d2}
     cur = conn.cursor()
     payload = {
         "funnel": [[n, g] for n, g in FUNNEL],
@@ -157,40 +209,42 @@ def build(conn, d1, d2):
         "reasons": {k: [[n, g] for n, g in v] for k, v in REASONS.items()},
         "unit": "person",
     }
+
     for level, expr in KEYS.items():
+        t0 = datetime.now()
         bucket = {}
         cur.execute(
-            BASE + f"SELECT {expr} AS k, gid, count(distinct cid), "
+            f"SELECT {expr} AS k, gid, count(distinct cid), "
             "count(distinct cid) FILTER (WHERE is_new) "
-            "FROM e WHERE gid = ANY(%(ids)s) GROUP BY 1,2",
-            {**p, "ids": STEP_IDS},
+            "FROM emat WHERE gid = ANY(%(ids)s) GROUP BY 1,2",
+            {"ids": STEP_IDS},
         )
         for k, gid, a, n in cur.fetchall():
             bucket.setdefault(k, {})[gid] = [a, n or 0]
         if level != "hour":
             cur.execute(
-                BASE + f"SELECT {expr} AS k, gid, count(distinct cid), "
+                f"SELECT {expr} AS k, gid, count(distinct cid), "
                 "count(distinct cid) FILTER (WHERE is_new), "
                 "count(distinct vid), "
                 "count(distinct vid) FILTER (WHERE is_new) "
-                "FROM e WHERE gid = ANY(%(ids)s) GROUP BY 1,2",
-                {**p, "ids": EVENT_IDS},
+                "FROM emat WHERE gid = ANY(%(ids)s) GROUP BY 1,2",
+                {"ids": EVENT_IDS},
             )
             for k, gid, a, n, va, vn in cur.fetchall():
                 bucket.setdefault(k, {})[gid] = [a, n or 0, va, vn or 0]
         payload[level] = bucket
-        log(f"  level {level}: {len(bucket)} keys")
+        log(f"  level {level}: {len(bucket)} keys "
+            f"({(datetime.now() - t0).seconds}s)")
 
     bits = ",".join(f"('{g}',{1 << i})" for i, (_, g) in enumerate(FUNNEL))
     strict = {}
     for level in ("month", "week", "day"):
         expr = KEYS[level]
         cur.execute(
-            BASE + f"SELECT k, mask, isn, count(*) FROM ("
+            f"SELECT k, mask, isn, count(*) FROM ("
             f"SELECT {expr} AS k, cid, bool_or(is_new) AS isn, "
-            f"bit_or(s.b) AS mask FROM e JOIN (VALUES {bits}) AS s(gid,b) "
-            "ON s.gid = e.gid GROUP BY 1,2) t GROUP BY 1,2,3",
-            p,
+            f"bit_or(s.b) AS mask FROM emat JOIN (VALUES {bits}) AS s(gid,b) "
+            "ON s.gid = emat.gid GROUP BY 1,2) t GROUP BY 1,2,3"
         )
         acc = {}
         for k, mask, isn, cnt in cur.fetchall():
@@ -207,12 +261,13 @@ def build(conn, d1, d2):
     payload["strict"] = strict
 
     dim = {}
+    t0 = datetime.now()
     for dname, dexpr in DIMS.items():
         cur.execute(
-            BASE + "SELECT to_char(d,'YYYY-MM') AS k, gid, "
+            "SELECT to_char(d,'YYYY-MM') AS k, gid, "
             f"{dexpr} AS val, count(distinct cid) AS c "
-            "FROM e WHERE gid = ANY(%(ids)s) GROUP BY 1,2,3",
-            {**p, "ids": STEP_IDS},
+            "FROM emat WHERE gid = ANY(%(ids)s) GROUP BY 1,2,3",
+            {"ids": STEP_IDS},
         )
         tmp = {}
         for k, gid, val, c in cur.fetchall():
@@ -221,15 +276,17 @@ def build(conn, d1, d2):
             for gid, vals in goals.items():
                 vals.sort(key=lambda x: -x[1])
                 dim.setdefault(k, {}).setdefault(gid, {})[dname] = vals[:7]
-        log(f"  dim {dname}: ok")
     payload["dim"] = dim
+    log(f"  dims: 4 ok ({(datetime.now() - t0).seconds}s)")
 
+    t0 = datetime.now()
     cur.execute(
-        BASE + "SELECT gid, min(d)::text, max(d)::text, count(distinct d) "
-        "FROM e GROUP BY 1",
-        p,
+        "SELECT gid, min(d)::text, max(d)::text, count(distinct d) "
+        "FROM emat GROUP BY 1"
     )
     payload["cov"] = {g: [a, b, c] for g, a, b, c in cur.fetchall()}
+    log(f"  coverage: {len(payload['cov'])} goals "
+        f"({(datetime.now() - t0).seconds}s)")
 
     cur.execute(
         "SELECT entity_created::date::text, count(*) FROM public.clients "
@@ -327,8 +384,10 @@ def main():
         return 1
 
     run_id = journal_start("build_payload")
+    t_all = datetime.now()
     try:
         log(f"building payload {d1}..{d2} (unit: person)")
+        materialize(conn, d1, d2)
         payload = build(conn, d1, d2)
         conn.close()
         quality_checks(payload, d2)
@@ -337,9 +396,14 @@ def main():
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
         size = os.path.getsize(OUT)
         journal_end(run_id, "ok", size)
-        log(f"DONE build_payload: {OUT} ({size / 1024 / 1024:.2f} MB)")
+        log(f"DONE build_payload: {OUT} ({size / 1024 / 1024:.2f} MB), "
+            f"total {(datetime.now() - t_all).seconds}s")
         return 0
     except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
         journal_end(run_id, "fail", None, e)
         log(f"FAIL build_payload: {type(e).__name__}: {e}")
         return 1

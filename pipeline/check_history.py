@@ -8,23 +8,21 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAYLOAD = os.path.join(BASE_DIR, "state", "payload.json")
 BASELINE = os.path.join(BASE_DIR, "state", "baseline_history.json")
 
-# Допуски откалиброваны замером дозревания (probe_maturation, 13.08.2026).
-# Плато дрейфа по верхним шагам: -0.5% за 60 дней, дальше +0.02%/мес.
-TOL_ALL_DOWN = 1.0    # шаг всего: снижение
-TOL_ALL_UP = 0.1      # шаг всего: рост (склейка не может увеличить)
-TOL_NEW = 1.5         # сегмент «новые»: обе стороны
-TOL_STRICT = 2.0      # строгая лесенка: обе стороны
-ETALON_TOL = 0.1      # эталон Метрики
+# Tolerances calibrated by probe_maturation (2026-08-13, three months).
+# Browser-to-person link matures: -0.5% plateau over 60 days, +0.02%/month after.
+TOL_ALL_DOWN = 1.0
+TOL_ALL_UP = 0.1
+TOL_NEW = 1.5
+TOL_STRICT = 2.0
+ETALON_TOL = 0.1
 
-# Эталон пересчитан 13.08.2026 при переходе на подсчёт людей.
-# Прежние значения (39158 / 30034) относились к подсчёту браузеров.
+# Recalculated 2026-08-13 when counting switched from browsers to persons.
 ETALON = {
     "metrica_reg": {"2026-05": 39119, "2026-06": 29995},
     "db_reg": {"2026-05": 42116, "2026-06": 32214},
 }
 
 fails = []
-warns = []
 stats = {"all": 0.0, "new": 0.0, "strict": 0.0}
 
 
@@ -93,7 +91,7 @@ def check_etalon(P):
 
 
 def check_snapshot(P, B):
-    print("\n[2] Закрытые месяцы: люди и визиты")
+    print("\n[2] Закрытые месяцы")
     print(f"  снимок от {B.get('created', '?')}, единица: {B.get('unit', '?')}")
 
     lost = [m for m in B["months"] if m not in closed_months(P)]
@@ -106,11 +104,10 @@ def check_snapshot(P, B):
             fail(f"{m}: месяц отсутствует в payload")
             continue
         base = B["month"][m]
-        hard, soft, gone = [], 0, 0
+        hard, soft = [], 0
         for g, v in base.items():
             c = cur.get(g)
             if c is None:
-                gone += 1
                 hard.append(f"{g}: цель исчезла (было {v[0]})")
                 continue
             d_all = pct(c[0], v[0])
@@ -123,16 +120,22 @@ def check_snapshot(P, B):
             stats["new"] = max(stats["new"], abs(d_new))
             if abs(d_new) > TOL_NEW:
                 hard.append(f"{g} новые: {v[1]} -> {c[1]} ({d_new:+.2f}%)")
-            # Визиты от ключа человека не зависят — только точное равенство
-            if len(v) > 3 and len(c) > 3 and list(c[2:4]) != list(v[2:4]):
-                hard.append(f"{g} ВИЗИТЫ: {v[2:4]} -> {list(c[2:4])}")
+            # Total visits do not depend on the person key -> exact match.
+            # Visits of new segment do: is_new is derived per person.
+            if len(v) > 3 and len(c) > 3:
+                if c[2] != v[2]:
+                    hard.append(f"{g} ВИЗИТЫ всего: {v[2]} -> {c[2]}")
+                d_vn = pct(c[3], v[3])
+                stats["new"] = max(stats["new"], abs(d_vn))
+                if abs(d_vn) > TOL_NEW:
+                    hard.append(f"{g} визиты новых: {v[3]} -> {c[3]} "
+                                f"({d_vn:+.2f}%)")
         if hard:
             fail(f"{m}: нарушений {len(hard)}")
             for h in hard[:5]:
                 print(f"          {h}")
         else:
-            ok(f"{m}: {len(base)} целей в допуске "
-               f"(дозрело {soft}, визиты точны)")
+            ok(f"{m}: {len(base)} целей в допуске (дозрело {soft})")
 
     print("\n[3] Строгая лесенка")
     for m, arr in B["strict"].items():
@@ -167,10 +170,10 @@ def check_snapshot(P, B):
             ok(f"{m}: {len(bd)} дней без изменений")
 
     print("\n[5] Фактический дрейф")
-    print(f"  шаги всего:  {stats['all']:+.2f}%  (допуск "
-          f"-{TOL_ALL_DOWN}% .. +{TOL_ALL_UP}%)")
+    print(f"  шаги всего:    {stats['all']:+.2f}%  "
+          f"(допуск -{TOL_ALL_DOWN}% .. +{TOL_ALL_UP}%)")
     print(f"  сегмент новые: {stats['new']:.2f}%  (допуск {TOL_NEW}%)")
-    print(f"  лесенка:     {stats['strict']:.2f}%  (допуск {TOL_STRICT}%)")
+    print(f"  лесенка:       {stats['strict']:.2f}%  (допуск {TOL_STRICT}%)")
 
 
 def main():
@@ -200,7 +203,7 @@ def main():
 
     if not os.path.exists(BASELINE):
         print(f"\n[2] Снимок отсутствует: {BASELINE}")
-        print("     Снять: python pipeline\\check_history.py --freeze")
+        print("     Снять: run pipeline\\check_history.py --freeze")
         return 1 if fails else 0
 
     B = load(BASELINE, "baseline")
@@ -211,8 +214,6 @@ def main():
         print(f"РЕЗУЛЬТАТ: ИСТОРИЯ ИЗМЕНИЛАСЬ — {len(fails)} нарушений")
         for f in fails:
             print(f"  FAIL  {f}")
-        print("\nДопуски учитывают дозревание связи браузер-клиент.")
-        print("Выход за них означает ошибку расчёта, а не уточнение.")
         return 1
     print("РЕЗУЛЬТАТ: история в допуске")
     return 0
