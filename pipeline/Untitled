@@ -1,0 +1,131 @@
+import os
+import sys
+
+import psycopg2
+from dotenv import load_dotenv
+
+from funnel_goals import APPLY, FUNNEL
+
+load_dotenv()
+
+S = os.environ["PG_SCHEMA"]
+P = os.environ["TABLE_PREFIX"]
+V = f"{S}.{P}visits"
+M = f"{S}.{P}person_map"
+APPS = "public.loan_applications"
+D1, D2 = "2026-07-01", "2026-07-31"
+PREV1, PREV2 = "2026-05-01", "2026-06-30"
+
+AI_OK = dict(FUNNEL)["ADDITIONAL_INFO_PAGE_OK"]
+ID_PAGE = dict(FUNNEL)["IDENTIFICATION_PAGE"]
+ID_OK = dict(FUNNEL)["IDENTIFICATION_PAGE_OK"]
+PAY = dict(APPLY)["PAYMENT_PAGE"]
+CONF_OK = dict(FUNNEL)["CONFIRM_PAGE_OK"]
+
+
+def q(d1, d2):
+    return f"""
+    WITH v AS (
+      SELECT coalesce(m.pkey,'br:'||t.ym_s_clientid) AS pkey,
+             nullif(trim(both '[]' from coalesce(t.ym_s_goalsid,'')),'') AS gs
+      FROM {V} t LEFT JOIN {M} m ON m.cid=t.ym_s_clientid
+      WHERE t.load_date BETWEEN '{d1}' AND '{d2}'),
+    e AS (
+      SELECT v.pkey, g.gid FROM v
+      CROSS JOIN LATERAL unnest(string_to_array(v.gs,',')) AS g(gid)
+      WHERE v.gs IS NOT NULL)
+    """
+
+
+def conn():
+    return psycopg2.connect(
+        host=os.environ["PG_HOST"], port=int(os.environ["PG_PORT"]),
+        dbname=os.environ["PG_DB"], user=os.environ["PG_USER"],
+        password=os.environ["PG_PASSWORD"], connect_timeout=60)
+
+
+def main():
+    print("START", flush=True)
+    c = conn()
+    cur = c.cursor()
+    cur.execute("DROP TABLE IF EXISTS coh")
+    cur.execute(
+        q(D1, D2) + "SELECT DISTINCT a.pkey, "
+        "EXISTS (SELECT 1 FROM e x WHERE x.pkey=a.pkey AND x.gid=%s) AS saw_id "
+        "INTO TEMP coh "
+        "FROM (SELECT DISTINCT pkey FROM e WHERE gid=%s) a",
+        (ID_PAGE, AI_OK))
+    c.commit()
+    cur.execute("CREATE INDEX ON coh (pkey)")
+    cur.execute("ANALYZE coh")
+    cur.execute("SELECT saw_id, count(*) FROM coh GROUP BY 1 ORDER BY 1")
+    rows = dict(cur.fetchall())
+    skipped, saw = rows.get(False, 0), rows.get(True, 0)
+    tot = skipped + saw
+    print(f"\n[0] Отправили доп. сведения в июле: {tot}")
+    print(f"  видели экран идентификации:  {saw} ({100.0*saw/tot:.2f}%)")
+    print(f"  ПРОПУСТИЛИ его:              {skipped} "
+          f"({100.0*skipped/tot:.2f}%)")
+
+    print("\n[1] Повторные клиенты (есть прошлые займы на момент заявки)")
+    for flag, label in ((False, "пропустившие"), (True, "видевшие")):
+        cur.execute(
+            "SELECT count(*), count(*) FILTER (WHERE rep) FROM ("
+            "SELECT co.pkey, EXISTS (SELECT 1 FROM public.clients cl "
+            f"JOIN {APPS} la ON la.client_id=cl.id "
+            "WHERE cl.client_number::text=co.pkey "
+            "AND la.entity_created::date BETWEEN %s AND %s "
+            "AND la.loans_count > 0) AS rep "
+            "FROM coh co WHERE co.saw_id = %s) t",
+            (D1, D2, flag))
+        n, rep = cur.fetchone()
+        print(f"  {label:<14} {n:>7} чел., повторных {rep:>7} "
+              f"({100.0*rep/n if n else 0:.1f}%)")
+
+    print("\n[2] Проходили идентификацию раньше (май-июнь)")
+    for flag, label in ((False, "пропустившие"), (True, "видевшие")):
+        cur.execute(
+            q(PREV1, PREV2) + "SELECT count(*), count(*) FILTER (WHERE prev) "
+            "FROM (SELECT co.pkey, EXISTS (SELECT 1 FROM e x "
+            "WHERE x.pkey=co.pkey AND x.gid=%s) AS prev "
+            "FROM coh co WHERE co.saw_id=%s) t", (ID_OK, flag))
+        n, prev = cur.fetchone()
+        print(f"  {label:<14} {n:>7} чел., ранее идентифицировались {prev:>7} "
+              f"({100.0*prev/n if n else 0:.1f}%)")
+
+    print("\n[3] Куда попали дальше в июле")
+    for gid, nm in ((PAY, "экран выплаты"), (CONF_OK, "заявка отправлена"),
+                    (ID_OK, "идентификация готово")):
+        line = []
+        for flag, label in ((False, "пропустившие"), (True, "видевшие")):
+            cur.execute(
+                q(D1, D2) + "SELECT count(*), count(*) FILTER (WHERE hit) FROM ("
+                "SELECT co.pkey, EXISTS (SELECT 1 FROM e x WHERE x.pkey=co.pkey "
+                "AND x.gid=%s) AS hit FROM coh co WHERE co.saw_id=%s) t",
+                (gid, flag))
+            n, hit = cur.fetchone()
+            line.append(f"{label} {100.0*hit/n if n else 0:.1f}%")
+        print(f"  {nm:<24} {' | '.join(line)}")
+
+    print("\n[4] Признак Метрики «первый визит»")
+    for flag, label in ((False, "пропустившие"), (True, "видевшие")):
+        cur.execute(
+            f"SELECT count(*), count(*) FILTER (WHERE isnew) FROM ("
+            f"SELECT co.pkey, bool_or(t.ym_s_isnewuser='1') AS isnew "
+            f"FROM coh co JOIN {V} t ON coalesce("
+            f"(SELECT pkey FROM {M} WHERE cid=t.ym_s_clientid), "
+            "'br:'||t.ym_s_clientid)=co.pkey "
+            "WHERE t.load_date BETWEEN %s AND %s AND co.saw_id=%s "
+            "GROUP BY co.pkey) t", (D1, D2, flag))
+        n, isnew = cur.fetchone()
+        print(f"  {label:<14} {n:>7} чел., новых {isnew:>7} "
+              f"({100.0*isnew/n if n else 0:.1f}%)")
+
+    cur.close()
+    c.close()
+    print("\nDONE")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

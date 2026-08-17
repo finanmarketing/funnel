@@ -1,0 +1,606 @@
+main:
+SET ThousandSep=',';
+SET DecimalSep='.';
+SET MoneyThousandSep=',';
+SET MoneyDecimalSep='.';
+SET MoneyFormat='$#,##0.00;($#,##0.00)';
+SET TimeFormat='hh:mm:ss';
+SET DateFormat='DD.MM.YYYY';
+SET TimestampFormat='DD.MM.YYYY hh:mm:ss[.fff] ';
+SET FirstWeekDay=0;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='en-US';
+SET MonthNames='Jan;Feb;Mar;Apr;May;Jun;Jul;Aug;Sep;Oct;Nov;Dec';
+SET LongMonthNames='January;February;March;April;May;June;July;August;September;October;November;December';
+SET DayNames='Mon;Tue;Wed;Thu;Fri;Sat;Sun';
+SET LongDayNames='Monday;Tuesday;Wednesday;Thursday;Friday;Saturday;Sunday';
+
+
+SQL:
+//ODBC CONNECT TO Moneza_ru (XUserId is UHGdHSJMTbXEXSFMETPA, XPassword is CIfRMVJLXRYOGaIMHbRUXRRMGTdA);
+ODBC CONNECT TO Moneza_RU_for_BI (XUserId is faEdDSJMTbXEXSFMEDZA, XPassword is acLHHVJLXRYOGaIMHbRUXRRMGbaA); 
+
+Data1:
+NoConcatenate
+select 'Moneza_RU' as product,
+lag.loan_id, 
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as client_type, 
+lag.sign_date, 
+affc_id.name as affiliate_name,
+affc_id.partner_name, 
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as new_loan_price
+from loan_agreements lag
+left join loan_applications lapp on lapp.id = lag.loan_application_id
+left join lateral (select affc.id, affc.name, aff.partner_name
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lag.agreement_type = 'MAIN'
+and date_part('year', lag.sign_date)= date_part('year',date(now())) and date_part('month', lag.sign_date) = date_part('month',date(now()))
+and lag.status <> 'VOIDED';
+
+//ODBC CONNECT TO eZaem_RU (XUserId is FPIeJSJMTbXEXSFMELWB, XPassword is YLEdRCZNZTMKWaEPWLdEWQJJFDWKUZFMTJeGTcZNVCaKHPB); 
+ODBC CONNECT TO eZaem_RU_for_BI (XUserId is HJZGKSJMTbXEXSFMEbYA, XPassword is cMNIbXBOFLZOTaJOJLZGFcIOXA);
+
+Concatenate (Data1)
+select 'eZaem_RU' as product,
+lag.loan_id, 
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as client_type, 
+lag.sign_date, 
+affc_id.name as affiliate_name,
+affc_id.partner_name, 
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as new_loan_price
+from loan_agreements lag
+left join loan_applications lapp on lapp.id = lag.loan_application_id
+left join lateral (select affc.id, affc.name, aff.partner_name
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lag.agreement_type = 'MAIN'
+and date_part('year', lag.sign_date)= date_part('year',date(now())) and date_part('month', lag.sign_date) = date_part('month',date(now()))
+and lag.status <> 'VOIDED';
+
+ODBC CONNECT TO Finlove_RU;
+
+Concatenate (Data1)
+select 'Finlove_RU' as product,
+lag.loan_id, 
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as client_type, 
+lag.sign_date, 
+affc_id.name as affiliate_name,
+affc_id.partner_name, 
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as new_loan_price
+from loan_agreements lag
+left join loan_applications lapp on lapp.id = lag.loan_application_id
+left join lateral (select affc.id, affc.name, aff.partner_name
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lag.agreement_type = 'MAIN'
+and date_part('year', lag.sign_date)= date_part('year',date(now())) and date_part('month', lag.sign_date) = date_part('month',date(now()))
+and lag.status <> 'VOIDED';
+
+Logic:
+Data_Temp:
+NoConcatenate
+LOAD *,
+ PurgeChar (UPPER(affiliate_name),'.,_-0123456789') as Affiliate_temp
+Resident Data1;
+DROP Table Data1;
+
+Mapping1:
+NoConcatenate
+LOAD 
+     PurgeChar (UPPER(Affiliate),'.,_-0123456789') as Affiliate, 
+     PurgeChar (UPPER(Affiliate),'.,_-0123456789') as Affiliate_temp, 
+     Channel, 
+     Affiliate_group      
+FROM '\\bl1fss02\data$\Russia\Marketing Team\QlikView\Marketing\Affiliates.RU.xlsx'
+(ooxml, embedded labels, table is Mapping_AR);
+
+Mapping_Temp:
+NoConcatenate
+LOAD Distinct *
+Resident Mapping1
+where not isnull(Affiliate_temp);
+DROP Table Mapping1;
+
+left join (Data_Temp)
+LOAD 
+     Affiliate, 
+     Affiliate_temp,
+     Channel, 
+     Affiliate_group      
+Resident Mapping_Temp;
+DROP Table Mapping_Temp;
+
+Data2:
+NoConcatenate
+LOAD 
+product,
+sign_date as period,
+client_type,
+loan_id,
+affiliate_name,
+partner_name,
+if(if(isnull(Channel),if(isnull(affiliate_name),'Direct',affiliate_name),Channel) like 'dm_sms*', 'CRM', if(isnull(Channel),if(isnull(affiliate_name),'Direct',affiliate_name),Channel)) as Channel,  
+Affiliate_group,
+new_loan_price 
+Resident Data_Temp;
+DROP Table Data_Temp;
+
+Data:
+NoConcatenate
+LOAD 
+product,
+period,
+client_type,
+loan_id,
+affiliate_name,
+partner_name,
+if(Channel like 'dm_email*', 'CRM', if(Channel like 'dm_pop-up*', 'CRM', if(Channel like 'google*', 'sem', if(Channel like 'yandex*', 'sem', if(Channel like 'linkprofit*', 'affiliate', if(Channel like 'beeglnet*', 'affiliate', if(Channel like 'fincpa*', 'affiliate', if(Channel like 'ilimili*', 'affiliate', Channel)))))))) as Channel,  
+Affiliate_group,
+new_loan_price 
+Resident Data2;
+DROP Table Data2;
+
+
+//RENAME Table RR_matrix_Temp to RR_matrix;
+
+
+LA:
+//ODBC CONNECT TO Moneza_ru (XUserId is UHGdHSJMTbXEXSFMETPA, XPassword is CIfRMVJLXRYOGaIMHbRUXRRMGTdA);
+ODBC CONNECT TO Moneza_RU_for_BI (XUserId is faEdDSJMTbXEXSFMEDZA, XPassword is acLHHVJLXRYOGaIMHbRUXRRMGbaA); 
+
+la1:
+NoConcatenate
+select 'Moneza_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+
+//ODBC CONNECT TO eZaem_RU (XUserId is FPIeJSJMTbXEXSFMELWB, XPassword is YLEdRCZNZTMKWaEPWLdEWQJJFDWKUZFMTJeGTcZNVCaKHPB); 
+ODBC CONNECT TO eZaem_RU_for_BI (XUserId is HJZGKSJMTbXEXSFMEbYA, XPassword is cMNIbXBOFLZOTaJOJLZGFcIOXA);
+
+Concatenate (la1)
+select 'eZaem_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+
+ODBC CONNECT TO Finlove_RU;
+
+Concatenate (la1)
+select 'Finlove_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+Exit:
+EXIT SCRIPT;
+
+LA:
+//ODBC CONNECT TO Moneza_ru (XUserId is UHGdHSJMTbXEXSFMETPA, XPassword is CIfRMVJLXRYOGaIMHbRUXRRMGTdA);
+ODBC CONNECT TO Moneza_RU_for_BI (XUserId is faEdDSJMTbXEXSFMEDZA, XPassword is acLHHVJLXRYOGaIMHbRUXRRMGbaA); 
+
+la1:
+NoConcatenate
+select 'Moneza_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+
+//ODBC CONNECT TO eZaem_RU (XUserId is FPIeJSJMTbXEXSFMELWB, XPassword is YLEdRCZNZTMKWaEPWLdEWQJJFDWKUZFMTJeGTcZNVCaKHPB); 
+ODBC CONNECT TO eZaem_RU_for_BI (XUserId is HJZGKSJMTbXEXSFMEbYA, XPassword is cMNIbXBOFLZOTaJOJLZGFcIOXA);
+
+Concatenate (la1)
+select 'eZaem_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+
+ODBC CONNECT TO Finlove_RU;
+
+Concatenate (la1)
+select 'Finlove_RU' as product,
+date_part('hour', lapp.entity_created) as la_hour,
+date_part('year', lapp.entity_created) as la_year,
+date_part('month', lapp.entity_created) as la_month,	   
+date_part('day', lapp.entity_created) as la_day,
+lapp.id as loan_application_id,
+date(lapp.entity_created) as loan_application_entity_created,
+case when lapp.loans_count = 0 then 'NEW' else 'REP' end as la_client_type,
+case when lapp.loans_count = 0 and lag.sign_date is not null then 'Выдача' 
+when lapp.loans_count > 0 and lag.sign_date is not null then 'Повторная выдача' else 'Заявка' end as type, 
+c.client_number,
+lapp.resolution as loan_application_resolution,
+lapp.credit_score,
+lapp.reject_reason,
+affc_id.name as la_affiliate_name,
+affc_id.partner_name as la_partner_name,
+affc_id.token,
+lag.loan_id as la_loan_id,
+lag.amount as main_amount, 
+lag.sign_date as loan_date,
+date_part('month', lag.sign_date) as loan_month,
+coalesce(cost1.new_loan_price, cost2.new_loan_price) as loan_price
+from loan_applications lapp
+join clients c on c.id = lapp.client_id
+left join loan_agreements lag on lapp.id = lag.loan_application_id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+left join lateral (select affc.id, affc.name, aff.partner_name, aff.token
+from affiliates aff
+left join affiliate_configurations affc on affc.id = aff.affiliate_configuration_id
+where aff.loan_application_id = lapp.id order by aff.entity_created desc limit 1)
+as affc_id on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and affc_id.partner_name = acost.partner_name 
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost1 on true
+left join lateral (select new_loan_price 
+from affiliate_costs acost
+where acost.affiliate_configuration_id = affc_id.id
+and (acost.partner_name = '' or acost.partner_name is null)
+and lag.sign_date >= acost.date_from and lag.sign_date <= acost.date_to
+and lapp.loans_count = 0
+order by acost.id desc limit 1)
+as cost2 on true
+where lapp.is_additional_amount_application = 'f'
+and lapp.entity_created >= date_trunc('MONTH', now()-interval '3 month')
+;
+
+
+Logic:
+Data_Temp:
+NoConcatenate
+LOAD *,
+ PurgeChar (UPPER(affiliate_name),'.,_-0123456789') as Affiliate_temp
+Resident Data1;
+DROP Table Data1;
+
+Mapping1:
+NoConcatenate
+LOAD 
+     PurgeChar (UPPER(Affiliate),'.,_-0123456789') as Affiliate, 
+     PurgeChar (UPPER(Affiliate),'.,_-0123456789') as Affiliate_temp, 
+     Channel, 
+     Affiliate_group      
+FROM '\\bl1fss02\data$\Russia\Marketing Team\QlikView\Marketing\Affiliates.RU.xlsx'
+(ooxml, embedded labels, table is Mapping_AR);
+
+Mapping_Temp:
+NoConcatenate
+LOAD Distinct *
+Resident Mapping1
+where not isnull(Affiliate_temp);
+DROP Table Mapping1;
+
+left join (Data_Temp)
+LOAD 
+     Affiliate, 
+     Affiliate_temp,
+     Channel, 
+     Affiliate_group      
+Resident Mapping_Temp;
+DROP Table Mapping_Temp;
+
+Data2:
+NoConcatenate
+LOAD 
+product,
+sign_date as period,
+client_type,
+loan_id,
+affiliate_name,
+partner_name,
+if(if(isnull(Channel),if(isnull(affiliate_name),'Direct',affiliate_name),Channel) like 'dm_sms*', 'CRM', if(isnull(Channel),if(isnull(affiliate_name),'Direct',affiliate_name),Channel)) as Channel,  
+Affiliate_group,
+new_loan_price 
+Resident Data_Temp;
+DROP Table Data_Temp;
+
+Data:
+NoConcatenate
+LOAD 
+product,
+period,
+client_type,
+loan_id,
+affiliate_name,
+partner_name,
+if(Channel like 'dm_email*', 'CRM', if(Channel like 'dm_pop-up*', 'CRM', if(Channel like 'google*', 'sem', if(Channel like 'yandex*', 'sem', if(Channel like 'linkprofit*', 'affiliate', if(Channel like 'beeglnet*', 'affiliate', if(Channel like 'fincpa*', 'affiliate', if(Channel like 'ilimili*', 'affiliate', Channel)))))))) as Channel,  
+Affiliate_group,
+new_loan_price 
+Resident Data2;
+DROP Table Data2;
+
+
+//RENAME Table RR_matrix_Temp to RR_matrix;
+
+
+Expressions:

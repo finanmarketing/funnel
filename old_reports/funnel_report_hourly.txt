@@ -1,0 +1,429 @@
+main:
+SET ThousandSep=',';
+SET DecimalSep='.';
+SET MoneyThousandSep=',';
+SET MoneyDecimalSep='.';
+SET MoneyFormat='$#,##0.00;($#,##0.00)';
+SET TimeFormat='hh:mm:ss';
+SET DateFormat='YYYYMMDD';
+SET TimestampFormat='DD.MM.YYYY hh:mm:ss[.fff] ';
+SET FirstWeekDay=0;
+SET BrokenWeeks=1;
+SET ReferenceDay=0;
+SET FirstMonthOfYear=1;
+SET CollationLocale='en-US';
+SET MonthNames='Jan;Feb;Mar;Apr;May;Jun;Jul;Aug;Sep;Oct;Nov;Dec';
+SET LongMonthNames='January;February;March;April;May;June;July;August;September;October;November;December';
+SET DayNames='Mon;Tue;Wed;Thu;Fri;Sat;Sun';
+SET LongDayNames='Monday;Tuesday;Wednesday;Thursday;Friday;Saturday;Sunday';
+set ErrorMode=0;
+
+
+Metrika:
+LET vMetricsKEY = 'y0_AgAAAAB0IXTiAAtzBwAAAAD-TAyYAAAipOw788ZJXbQ6Q7QtGPqCeN3vkQ';
+LET vDate1 = date(date(floor(MonthEnd(today(), -2))) + 1, ‘YYYYMMDD’);
+LET vMetricsID = '21703744';
+
+CUSTOM CONNECT TO "Provider=QvRestConnector.exe;url=https://api-metrika.yandex.net/stat/v1/data.csv?id=$(vMetricsID)&metrics=ym:s:users,ym:s:newUsers&filters=ym:s:isRobot=='No'&dimensions=ym:s:date&date1=$(vDate1)&date2=today&limit=10000;
+timeout=90;method=GET;httpProtocol=1.1;isKeepAlive=1;bodyEncoding=UTF-8;sendExpect100Continue=1;autoDetectResponseType=1;checkResponseTypeOnTestConnection=1;keyGenerationStrategy=0;authSchema=anonymous;skipServerCertificateValidation=0;useCertificate=No;certificateStoreLocation=CurrentUser;certificateStoreName=My;addMissingQueryParametersToFinalRequest=1;queryHeaders=Authorization%2Bearer y0__xCKy4iFBRj94j4gkOTq2RaeBCJS-It7bVV5oFGV_UUreZJUug;PaginationType=None;allowResponseHeaders=0;allowHttpsOnly=0;";
+
+RestConnectorMasterTable:
+SQL SELECT 
+	"Date of visit",
+	"Users",
+	"New users"
+FROM CSV (header on, delimiter ",", quote """") "CSV_source";
+
+NoConcatenate
+CSV_metrics_day:
+LOAD	
+	'eZaem_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'NEW' as c_client_type,
+	//[Users] as la_users,
+    [New users] as la_users_day
+    //[Users] - [New users] as la_rep_users
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+Concatenate (CSV_metrics_day)
+LOAD	
+	'eZaem_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'REP' as c_client_type,
+	//[Users] as la_users,
+    //[New users] as la_new_users
+    [Users] - [New users] as la_users_day
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+DROP TABLE RestConnectorMasterTable;
+
+
+LET vMetricsID = '45884019';
+
+CUSTOM CONNECT TO "Provider=QvRestConnector.exe;url=https://api-metrika.yandex.net/stat/v1/data.csv?id=$(vMetricsID)&metrics=ym:s:users,ym:s:newUsers&filters=ym:s:isRobot==%%27No%%27&dimensions=ym:s:date&date1=$(vDate1)&date2=today&limit=10000;
+timeout=90;method=GET;httpProtocol=1.1;isKeepAlive=1;bodyEncoding=UTF-8;sendExpect100Continue=1;autoDetectResponseType=1;checkResponseTypeOnTestConnection=1;keyGenerationStrategy=0;authSchema=anonymous;skipServerCertificateValidation=0;useCertificate=No;certificateStoreLocation=CurrentUser;certificateStoreName=My;addMissingQueryParametersToFinalRequest=1;queryHeaders=Authorization%2Bearer y0__xCKy4iFBRj94j4gkOTq2RaeBCJS-It7bVV5oFGV_UUreZJUug;PaginationType=None;allowResponseHeaders=0;allowHttpsOnly=0;";
+
+RestConnectorMasterTable:
+SQL SELECT 
+	"Date of visit",
+	"Users",
+	"New users"
+FROM CSV (header on, delimiter ",", quote """") "CSV_source";
+
+Concatenate (CSV_metrics_day)
+LOAD	
+	'Moneza_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'NEW' as c_client_type,
+	//[Users] as la_users,
+    [New users] as la_users_day
+    //[Users] - [New users] as la_rep_users
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+Concatenate (CSV_metrics_day)
+LOAD	
+	'Moneza_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'REP' as c_client_type,
+	//[Users] as la_users,
+    //[New users] as la_new_users
+    [Users] - [New users] as la_users_day
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+DROP TABLE RestConnectorMasterTable;
+
+
+LET vMetricsID = '105772156';
+
+CUSTOM CONNECT TO "Provider=QvRestConnector.exe;url=https://api-metrika.yandex.net/stat/v1/data.csv?id=$(vMetricsID)&metrics=ym:s:users,ym:s:newUsers&filters=ym:s:isRobot==%%27No%%27&dimensions=ym:s:date&date1=$(vDate1)&date2=today&limit=10000;
+timeout=90;method=GET;httpProtocol=1.1;isKeepAlive=1;bodyEncoding=UTF-8;sendExpect100Continue=1;autoDetectResponseType=1;checkResponseTypeOnTestConnection=1;keyGenerationStrategy=0;authSchema=anonymous;skipServerCertificateValidation=0;useCertificate=No;certificateStoreLocation=CurrentUser;certificateStoreName=My;addMissingQueryParametersToFinalRequest=1;queryHeaders=Authorization%2Bearer y0__xCKy4iFBRj94j4gkOTq2RaeBCJS-It7bVV5oFGV_UUreZJUug;PaginationType=None;allowResponseHeaders=0;allowHttpsOnly=0;";
+
+RestConnectorMasterTable:
+SQL SELECT 
+	"Date of visit",
+	"Users",
+	"New users"
+FROM CSV (header on, delimiter ",", quote """") "CSV_source";
+
+Concatenate (CSV_metrics_day)
+LOAD	
+	'Finlove_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'NEW' as c_client_type,
+	//[Users] as la_users,
+    [New users] as la_users_day
+    //[Users] - [New users] as la_rep_users
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+Concatenate (CSV_metrics_day)
+LOAD	
+	'Finlove_RU' as product,
+	date([Date of visit]) as c_date,
+	year([Date of visit]) as c_Year,
+	//month([Date of visit]) as la_month,
+	day([Date of visit]) as c_Day,
+	'REP' as c_client_type,
+	//[Users] as la_users,
+    //[New users] as la_new_users
+    [Users] - [New users] as la_users_day
+RESIDENT RestConnectorMasterTable
+where [Date of visit] <> 'Totals and averages';
+
+DROP TABLE RestConnectorMasterTable;
+
+SQL:
+	//ODBC CONNECT TO Moneza_ru (XUserId is UHGdHSJMTbXEXSFMETPA, XPassword is CIfRMVJLXRYOGaIMHbRUXRRMGTdA);
+	ODBC CONNECT TO Moneza_RU_for_BI (XUserId is faEdDSJMTbXEXSFMEDZA, XPassword is acLHHVJLXRYOGaIMHbRUXRRMGbaA); 
+	
+	table_funnel:
+	NoConcatenate
+	select 'Moneza_RU' as product1,
+	la.id || '_mn' as loan_applications_id1, 
+	date(la.entity_created) as c_date1,
+	case when la.loans_count = 0 then 'NEW' else 'REP' end as loans_count1,
+	step.finished_details_step,
+	step.step_date as revision_date,
+	aff1.affiliate_name as affiliate_name1,
+	lag.entity_created as entity_created1,
+	la.payment_method as payment_method1,
+	la.status,
+	la.resolution,
+	la.resolution_message,
+	la.manual_warnings,
+	la.reject_reason,
+	c.social_account_provider
+	from loan_applications la
+	left join clients c on c.id = la.client_id 
+	left join lateral (select distinct rfds.finished_details_step, min(rfds.entity_created) AS step_date
+	from risk_finished_detail_steps rfds
+	where rfds.loan_application_id = la.id and rfds.entity_created <= coalesce(la.close_date, now())
+	group by rfds.finished_details_step)
+	as step on true
+	left join lateral (select affc.name as affiliate_name from affiliates aff
+	join affiliate_configurations affc on aff.affiliate_configuration_id = affc.id
+	where aff.loan_application_id = la.id order by aff.entity_created desc
+	limit 1)
+	as aff1 on true
+	left join loan_agreements lag on lag.loan_application_id = la.id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+	where la.entity_created>= (date_trunc('month', now())::date - interval '1 month') and la.is_additional_amount_application = 'f';
+	
+	//ODBC CONNECT TO eZaem_RU (XUserId is FPIeJSJMTbXEXSFMELWB, XPassword is YLEdRCZNZTMKWaEPWLdEWQJJFDWKUZFMTJeGTcZNVCaKHPB); 
+	ODBC CONNECT TO eZaem_RU_for_BI (XUserId is HJZGKSJMTbXEXSFMEbYA, XPassword is cMNIbXBOFLZOTaJOJLZGFcIOXA);
+	
+	Concatenate (table_funnel)
+	select 'eZaem_RU' as product1,
+	la.id || '_ez' as loan_applications_id1, 
+	date(la.entity_created) as c_date1,
+	case when la.loans_count = 0 then 'NEW' else 'REP' end as loans_count1,
+	step.finished_details_step,
+	step.step_date as revision_date,
+	aff1.affiliate_name as affiliate_name1,
+	lag.entity_created as entity_created1,
+	la.payment_method as payment_method1,
+	la.status,
+	la.resolution,
+	la.resolution_message,
+	la.manual_warnings,
+	la.reject_reason,
+	c.social_account_provider
+	from loan_applications la
+	left join clients c on c.id = la.client_id 
+	left join lateral (select distinct rfds.finished_details_step, min(rfds.entity_created) AS step_date
+	from risk_finished_detail_steps rfds
+	where rfds.loan_application_id = la.id and rfds.entity_created <= coalesce(la.close_date, now())
+	group by rfds.finished_details_step)
+	as step on true
+	left join lateral (select affc.name as affiliate_name from affiliates aff
+	join affiliate_configurations affc on aff.affiliate_configuration_id = affc.id
+	where aff.loan_application_id = la.id order by aff.entity_created desc
+	limit 1)
+	as aff1 on true
+	left join loan_agreements lag on lag.loan_application_id = la.id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+	where la.entity_created>= (date_trunc('month', now())::date - interval '1 month') and la.is_additional_amount_application = 'f';
+	
+	ODBC CONNECT TO Finlove_RU;
+
+	Concatenate (table_funnel)
+	select 'Finlove_RU' as product1,
+	la.id || '_fl' as loan_applications_id1, 
+	date(la.entity_created) as c_date1,
+	case when la.loans_count = 0 then 'NEW' else 'REP' end as loans_count1,
+	step.finished_details_step,
+	step.step_date as revision_date,
+	aff1.affiliate_name as affiliate_name1,
+	lag.entity_created as entity_created1,
+	la.payment_method as payment_method1,
+	la.status,
+	la.resolution,
+	la.resolution_message,
+	la.manual_warnings,
+	la.reject_reason,
+	c.social_account_provider
+	from loan_applications la
+	left join clients c on c.id = la.client_id 
+	left join lateral (select distinct rfds.finished_details_step, min(rfds.entity_created) AS step_date
+	from risk_finished_detail_steps rfds
+	where rfds.loan_application_id = la.id and rfds.entity_created <= coalesce(la.close_date, now())
+	group by rfds.finished_details_step)
+	as step on true
+	left join lateral (select affc.name as affiliate_name from affiliates aff
+	join affiliate_configurations affc on aff.affiliate_configuration_id = affc.id
+	where aff.loan_application_id = la.id order by aff.entity_created desc
+	limit 1)
+	as aff1 on true
+	left join loan_agreements lag on lag.loan_application_id = la.id and lag.agreement_type = 'MAIN' and lag.status <> 'VOIDED'
+	where la.entity_created>= (date_trunc('month', now())::date - interval '1 month') and la.is_additional_amount_application = 'f';
+
+
+Main:
+Data1:
+LOAD Distinct product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	loans_count1 as c_client_type,
+	payment_method1 as payment_method,
+	social_account_provider,
+	day(c_date1) as c_Day,
+	month(c_date1) as c_Month,
+	year(c_date1) as c_Year,
+	entity_created1 as loan_entity_created,
+	status,
+	resolution,
+	reject_reason,
+	if (isnull(affiliate_name1),'N/A',affiliate_name1) as affiliate_name,
+	if(resolution='REJECTED' and match(reject_reason,'MANUAL_REJECT','MANUAL_REJECT_BEFORE_IDENTIFICATION'), 'MANUAL', if(isnull(manual_warnings),'AUTOMATIC','MANUAL')) as Request_Approval_Type_1,
+	If(IsNull(resolution_message), 'N/A',
+	   If(substringcount(resolution_message, '{rule:') > 0, SubField(If(wildmatch(resolution_message, '*don?t*', '*can?t*', '*client?s*') > 0, replace(replace(resolution_message, 'n'&CHR(39)&'t', 'n_t'), 't'&CHR(39)&'s', 't_s'), resolution_message), chr(39), 2), resolution_message)) as Resolution_Rule
+Resident table_funnel;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	revision_date as step_1_time
+Resident table_funnel
+where finished_details_step = 1;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_2_time
+Resident table_funnel
+where finished_details_step = 2;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_3_time
+Resident table_funnel
+where finished_details_step = 3;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_4_time
+Resident table_funnel
+where finished_details_step = 4;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_5_time
+Resident table_funnel
+where finished_details_step = 5;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_6_time
+Resident table_funnel
+where finished_details_step = 6;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_7_time
+Resident table_funnel
+where finished_details_step = 7;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_8_time
+Resident table_funnel
+where finished_details_step = 8;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_9_time
+Resident table_funnel
+where finished_details_step = 9;
+
+Left Join (Data1)
+LOAD product1 as product,
+	loan_applications_id1 as loan_applications_id,
+	c_date1 as c_date,
+	revision_date as step_10_time
+Resident table_funnel
+where finished_details_step = 10;
+
+Drop Table table_funnel;
+
+DATA:
+NoConcatenate
+LOAD product,
+	 loan_applications_id,
+	 c_date,
+	 c_client_type,
+	 payment_method,
+	 social_account_provider,
+	 c_Day,
+	 c_Month,
+	 c_Year,
+	 loan_entity_created,
+	 status,
+	 resolution,
+	 reject_reason,
+	 affiliate_name,
+	 step_1_time,
+	 step_2_time,
+	 step_3_time,
+	 step_4_time,
+	 step_5_time,
+	 step_6_time,
+	 step_7_time,
+	 step_8_time,
+	 step_9_time,
+	 step_10_time,
+	 if(Resolution_Rule='Not enough funds','AUTOMATIC', Request_Approval_Type_1) as Request_Approval_Type
+Resident Data1;
+Drop Table Data1;
+
+Exit:
+EXIT SCRIPT;
+
+
+Expressions:
+Traffic:
+1
+
+REG_STEP_1 / REGISTRATION_STEP_1_FINISHED:
+=if(c_client_type='REP', 0,count(step_1_time)/sum(la_users_day))
+
+STEP_1 -> STEP_2 / REGISTRATION_STEP_2_FINISHED:
+=if(c_client_type='REP', 0,count(step_2_time)/count(step_1_time))
+
+STEP_2 -> STEP_3:
+=if(c_client_type='REP', 0,count(step_3_time)/count(step_2_time))
+
+STEP_3 -> STEP_4
+=if(c_client_type='REP', 0,count(step_4_time)/count(RangeMin(step_3_time, step_4_time)))
+
+STEP_4 -> STEP_5
+=count(step_5_time)/count(step_4_time)
+
+STEP_5 -> STEP_6
+=count(step_6_time)/count(step_5_time)
+
+STEP_6 -> STEP_7
+=count(step_7_time)/count(step_6_time)
+
+STEP_7 -> STEP_8
+=count(step_8_time)/count(step_7_time)
+
+STEP_8 -> STEP_9
+=count(step_9_time)/count(step_8_time)
+
+STEP_9 -> STEP_10
+=count(RangeMin(step_10_time))/count(RangeMin(step_9_time))
+
+STEP_10 -> LOAN
+=count(loan_entity_created)/count(RangeMin(step_10_time,loan_entity_created))
